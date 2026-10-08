@@ -2,6 +2,8 @@
 
 Windows garde les notifications dans %LOCALAPPDATA%\\Microsoft\\Windows\\Notifications\\wpndatabase.db.
 On en lit une copie (sans jamais modifier l'original) et on garde notre propre historique trié."""
+import contextlib
+import copy
 import datetime
 import json
 import os
@@ -32,15 +34,39 @@ URGENT_WORDS = ("urgent", "important", "asap", "vite", "appel manqué", "missed 
                 "livraison", "colis", "rendez-vous", "rappel", "@")
 
 
-def _load():
+_CACHE = {"stamp": None, "data": None}
+
+
+def _stamp():
+    try:
+        st = os.stat(STORE)
+        return st.st_mtime_ns, st.st_size
+    except OSError:
+        return None
+
+
+def _peek():
+    """Historique en LECTURE SEULE, relu seulement si le fichier a changé (le badge 🔔 et le panneau
+    le consultent très souvent)."""
+    stamp = _stamp()
+    if _CACHE["data"] is not None and stamp == _CACHE["stamp"]:
+        return _CACHE["data"]
     try:
         with open(STORE, "r", encoding="utf-8") as f:
             d = json.load(f)
+        if not isinstance(d, dict):
+            d = {}
     except Exception:
         d = {}
     d.setdefault("last_id", 0)
     d.setdefault("items", [])
+    _CACHE.update(stamp=stamp, data=d)
     return d
+
+
+def _load():
+    """Copie modifiable (pour les écritures, sous _LOCK)."""
+    return copy.deepcopy(_peek())
 
 
 def _save(d):
@@ -49,6 +75,7 @@ def _save(d):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(d, f, indent=1, ensure_ascii=False)
     os.replace(tmp, STORE)
+    _CACHE.update(stamp=_stamp(), data=copy.deepcopy(d))
 
 
 def _app_name(primary):
@@ -92,12 +119,11 @@ def read_db(after_id, limit, db_path=None):
         for suffix in ("", "-wal", "-shm"):
             if os.path.exists(db_path + suffix):
                 shutil.copy2(db_path + suffix, os.path.join(tmp, "wpn.db" + suffix))
-        con = sqlite3.connect(os.path.join(tmp, "wpn.db"))
-        rows = con.execute(
-            "SELECT n.Id, h.PrimaryId, n.Payload, n.ArrivalTime FROM Notification n "
-            "JOIN NotificationHandler h ON n.HandlerId = h.RecordId "
-            "WHERE n.Type = 'toast' AND n.Id > ? ORDER BY n.Id DESC LIMIT ?", (after_id, limit)).fetchall()
-        con.close()
+        with contextlib.closing(sqlite3.connect(os.path.join(tmp, "wpn.db"))) as con:
+            rows = con.execute(
+                "SELECT n.Id, h.PrimaryId, n.Payload, n.ArrivalTime FROM Notification n "
+                "JOIN NotificationHandler h ON n.HandlerId = h.RecordId "
+                "WHERE n.Type = 'toast' AND n.Id > ? ORDER BY n.Id DESC LIMIT ?", (after_id, limit)).fetchall()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     max_id, out = after_id, []
@@ -117,9 +143,16 @@ def read_db(after_id, limit, db_path=None):
 _MTIME = {"v": None}
 
 
+def _mtime(path):
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:  # absent, ou supprimé entre deux vérifications
+        return 0
+
+
 def db_changed():
     """Vrai si Windows a écrit une nouvelle notification depuis le dernier passage (évite des copies inutiles)."""
-    stamp = tuple(os.path.getmtime(DB + s) if os.path.exists(DB + s) else 0 for s in ("", "-wal"))
+    stamp = tuple(_mtime(DB + s) for s in ("", "-wal"))
     changed = stamp != _MTIME["v"]
     _MTIME["v"] = stamp
     return changed
@@ -129,8 +162,7 @@ def fetch_new():
     """Nouvelles notifications depuis la dernière vérification. Renvoie (liste, premier_lancement)."""
     if not IS_WIN:
         return [], False
-    with _LOCK:
-        last = _load()["last_id"]
+    last = _peek()["last_id"]
     first = last == 0
     max_id, items = read_db(last, 15 if first else 100)
     if max_id != last and not items:
@@ -146,14 +178,22 @@ def fetch_new():
 RULE_RE = re.compile(r"\[notif\] Les notifications de (.+?) « (.*?) » (sont importantes|ne sont pas importantes)")
 
 
-def learned_rule(item):
-    """Règle apprise quand tu corriges le tri (bouton du panneau) : appliquée instantanément, sans l'IA."""
+def learned_rules():
+    """Règles apprises quand tu corriges le tri (bouton du panneau) : {(app, titre[:60]) : important}.
+    Lues une fois par lot de notifications au lieu d'une fois par notification."""
     import memory
-    for f in reversed(memory._load()["facts"]):
+    rules = {}
+    for f in memory._peek()["facts"]:  # dans l'ordre : la règle la plus récente l'emporte
         m = RULE_RE.search(f["text"])
-        if m and m.group(1).lower() == item["app"].lower() and m.group(2).lower() == item["title"][:60].lower():
-            return m.group(3) == "sont importantes"
-    return None
+        if m:
+            rules[(m.group(1).lower(), m.group(2).lower())] = m.group(3) == "sont importantes"
+    return rules
+
+
+def learned_rule(item, rules=None):
+    """Règle apprise pour cette notification : True / False, ou None s'il n'y en a pas."""
+    rules = learned_rules() if rules is None else rules
+    return rules.get((item["app"].lower(), item["title"][:60].lower()))
 
 
 def heuristic(item):
@@ -177,12 +217,12 @@ def add(items, seen=False):
 
 
 def recent(only_important=None, app=None, count=20):
-    items = _load()["items"]
+    items = _peek()["items"]
     if only_important is not None:
         items = [i for i in items if bool(i.get("important")) == bool(only_important)]
     if app:
         items = [i for i in items if app.lower() in i["app"].lower()]
-    return list(reversed(items))[:count]
+    return copy.deepcopy(items[::-1][:count])
 
 
 def set_importance(nid, important):
@@ -197,11 +237,13 @@ def set_importance(nid, important):
 
 
 def unseen_important():
-    return sum(1 for i in _load()["items"] if i.get("important") and not i.get("seen"))
+    return sum(1 for i in _peek()["items"] if i.get("important") and not i.get("seen"))
 
 
 def mark_all_seen():
     with _LOCK:
+        if all(i.get("seen") for i in _peek()["items"]):
+            return  # rien à écrire
         d = _load()
         for i in d["items"]:
             i["seen"] = True

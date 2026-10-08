@@ -1,12 +1,14 @@
 """Outils que l'IA peut utiliser : fichiers, applications, web, Outlook, Spotify."""
 import datetime
 import html
+import inspect
 import json
 import locale
 import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 import webbrowser
@@ -68,16 +70,36 @@ def schemas():
     return [t["schema"] for t in REGISTRY.values()]
 
 
+def _fit_args(fn, args):
+    """Garde les arguments que l'outil accepte (les modèles en ajoutent parfois d'inventés) et
+    signale clairement ceux qui manquent, sans confondre avec une erreur interne de l'outil."""
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return args
+    params = list(sig.parameters.values())[1:]  # le 1er paramètre est ctx
+    if not any(p.kind == p.VAR_KEYWORD for p in params):
+        args = {k: v for k, v in args.items() if k in sig.parameters}
+    missing = [p.name for p in params if p.default is p.empty
+               and p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY) and p.name not in args]
+    if missing:
+        raise TypeError(f"argument(s) manquant(s) : {', '.join(missing)}")
+    return args
+
+
 def run(name, args, ctx):
     if name not in REGISTRY:
         return f"Erreur : outil inconnu '{name}'."
+    fn = REGISTRY[name]["fn"]
     try:
-        result = REGISTRY[name]["fn"](ctx, **(args or {}))
+        args = _fit_args(fn, args if isinstance(args, dict) else {})
+    except TypeError as e:
+        return f"Erreur d'arguments pour {name} : {e}"
+    try:
+        result = fn(ctx, **args)
         return result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, default=str)
     except ToolError as e:
         return f"Erreur : {e}"
-    except TypeError as e:
-        return f"Erreur d'arguments pour {name} : {e}"
     except Exception as e:
         return f"Erreur pendant {name} : {type(e).__name__}: {e}"
 
@@ -259,11 +281,13 @@ def search_files(ctx, query, extension=None):
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [d for d in dirnames
                            if not d.startswith(".") and d.lower() not in SKIP_DIRS]
-            for name, is_dir in [(d, True) for d in dirnames] + [(f, False) for f in filenames]:
-                low = name.lower()
-                if ext and (is_dir or not low.endswith(ext)):
-                    continue
-                if all(w in low for w in words):
+            for names, is_dir in ((dirnames, True), (filenames, False)):
+                if is_dir and ext:
+                    continue  # on cherche une extension : les dossiers ne comptent pas
+                for name in names:
+                    low = name.lower()
+                    if (ext and not low.endswith(ext)) or not all(w in low for w in words):
+                        continue
                     full = os.path.join(dirpath, name)
                     try:
                         mtime = os.path.getmtime(full)
@@ -272,6 +296,8 @@ def search_files(ctx, query, extension=None):
                     results.append((mtime, full, is_dir))
             if time.time() > deadline or len(results) > 300:
                 break
+        if time.time() > deadline or len(results) > 300:
+            break  # le délai vaut pour TOUTE la recherche, pas pour chaque dossier
     if not results:
         return f"Aucun fichier trouvé pour « {query} »."
     results.sort(reverse=True)
@@ -306,17 +332,32 @@ APP_ALIASES = {
 }
 
 
-def _start_menu_shortcuts():
+_SHORTCUTS = {"time": 0.0, "items": []}
+SHORTCUTS_TTL = 300  # s
+
+
+def _scan_shortcuts():
     dirs = [os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"),
                          r"Microsoft\Windows\Start Menu\Programs"),
             os.path.join(os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu\Programs"),
             os.path.join(os.path.expanduser("~"), "Desktop")]
+    out = []
     for d in dirs:
         if os.path.isdir(d):
             for dirpath, _, files in os.walk(d):
                 for f in files:
                     if f.lower().endswith((".lnk", ".url")):
-                        yield os.path.splitext(f)[0], os.path.join(dirpath, f)
+                        out.append((os.path.splitext(f)[0], os.path.join(dirpath, f)))
+    return out
+
+
+def _start_menu_shortcuts():
+    """Raccourcis du menu Démarrer et du Bureau, gardés 5 min en cache (le parcours complet
+    des dossiers prenait du temps à chaque lancement d'application)."""
+    now = time.monotonic()
+    if not _SHORTCUTS["items"] or now - _SHORTCUTS["time"] > SHORTCUTS_TTL:
+        _SHORTCUTS.update(time=now, items=_scan_shortcuts())
+    return _SHORTCUTS["items"]
 
 
 @tool("launch_app", "Lance une application installée (ex. Spotify, Outlook, Word, Chrome, Discord, calculatrice).",
@@ -346,7 +387,9 @@ def launch_app(ctx, name):
 
 # ───────────────────────── Outlook (mail + agenda) ─────────────────────────
 
-_MAIL_CACHE = {}
+_MAIL_CACHE = {}       # id court → EntryID Outlook
+_MAIL_IDS = {}         # EntryID → id court (le même mail garde le même id)
+MAX_MAIL_IDS = 500
 
 
 def _outlook():
@@ -428,12 +471,22 @@ def create_event(ctx, title, start, duration_minutes=60, location="", reminder_m
     return f"Rendez-vous créé : {msg}"
 
 
+def _mail_id(entry_id):
+    idx = _MAIL_IDS.get(entry_id)
+    if idx is None:
+        idx = max(_MAIL_CACHE, default=0) + 1
+        _MAIL_CACHE[idx], _MAIL_IDS[entry_id] = entry_id, idx
+        if len(_MAIL_CACHE) > MAX_MAIL_IDS:  # oublie les plus anciens
+            for old in sorted(_MAIL_CACHE)[:len(_MAIL_CACHE) - MAX_MAIL_IDS]:
+                _MAIL_IDS.pop(_MAIL_CACHE.pop(old), None)
+    return idx
+
+
 def _mail_lines(collection, count):
     out, it = [], collection.GetFirst()
     while it is not None and len(out) < count:
         if getattr(it, "Class", None) == 43:  # MailItem
-            idx = len(_MAIL_CACHE) + 1
-            _MAIL_CACHE[idx] = it.EntryID
+            idx = _mail_id(it.EntryID)
             preview = " ".join((it.Body or "").split())[:140]
             out.append(f"[id {idx}] {'(non lu) ' if it.UnRead else ''}{_cd(it.ReceivedTime)} — "
                        f"de {it.SenderName} — « {it.Subject} » — {preview}")
@@ -520,29 +573,44 @@ def reply_email(ctx, id, body):
 
 # ───────────────────────── Spotify ─────────────────────────
 
-_SP = None
+_SP = {"client": None, "cid": None, "device": None, "device_time": 0.0}
+_SP_LOCK = threading.Lock()
 SP_SCOPE = "user-modify-playback-state user-read-playback-state user-read-currently-playing"
+DEVICE_TTL = 30  # s : évite un appel « devices » en plus à chaque commande
 
 
 def _spotify(ctx):
-    global _SP
-    if _SP:
-        return _SP
     cid = ctx.config.get("spotify_client_id", "").strip()
     if not cid:
         raise ToolError("Spotify n'est pas configuré : ajoute ton spotify_client_id dans les "
                         "réglages (bouton ⚙). Voir le LISEZMOI.")
-    import spotipy
-    from spotipy.cache_handler import CacheFileHandler
-    from spotipy.oauth2 import SpotifyPKCE
-    auth = SpotifyPKCE(client_id=cid, redirect_uri=ctx.config["spotify_redirect_uri"],
-                       scope=SP_SCOPE, open_browser=True,
-                       cache_handler=CacheFileHandler(cache_path=os.path.join(APP_DIR, ".spotify_cache")))
-    _SP = spotipy.Spotify(auth_manager=auth)
-    return _SP
+    with _SP_LOCK:
+        if _SP["client"] is not None and _SP["cid"] == cid:
+            return _SP["client"]
+        import spotipy
+        from spotipy.cache_handler import CacheFileHandler
+        from spotipy.oauth2 import SpotifyPKCE
+        auth = SpotifyPKCE(client_id=cid, redirect_uri=ctx.config["spotify_redirect_uri"],
+                           scope=SP_SCOPE, open_browser=True,
+                           cache_handler=CacheFileHandler(cache_path=os.path.join(APP_DIR, ".spotify_cache")))
+        # Nouveau Client ID → nouveau client (avant, l'ancien restait utilisé jusqu'au redémarrage)
+        _SP.update(client=spotipy.Spotify(auth_manager=auth), cid=cid, device=None)
+        return _SP["client"]
 
 
 def _device(sp):
+    if _SP["device"] and time.monotonic() - _SP["device_time"] < DEVICE_TTL:
+        return _SP["device"]
+    dev = _find_device(sp)
+    _SP.update(device=dev, device_time=time.monotonic())
+    return dev
+
+
+def _forget_device():
+    _SP["device"] = None
+
+
+def _find_device(sp):
     devices = sp.devices().get("devices", [])
     for d in devices:
         if d.get("is_active"):
@@ -560,6 +628,19 @@ def _device(sp):
     return devices[0]["id"]
 
 
+def _on_device(sp, action):
+    """Exécute action(device_id). Si l'appareil gardé en cache a disparu, on le recherche une fois."""
+    try:
+        return action(_device(sp))
+    except ToolError:
+        raise
+    except Exception:
+        if _SP["device"] is None:
+            raise
+        _forget_device()
+        return action(_device(sp))
+
+
 @tool("spotify_play", "Joue de la musique sur Spotify : un titre, un artiste, un album ou une playlist. "
                       "Sans query, reprend la lecture.",
       {"query": {"type": "string", "description": "Ce qu'il faut chercher, ex. 'Bohemian Rhapsody Queen'"},
@@ -568,9 +649,8 @@ def _device(sp):
       label="Je lance la musique")
 def spotify_play(ctx, query="", kind="track"):
     sp = _spotify(ctx)
-    dev = _device(sp)
     if not query:
-        sp.start_playback(device_id=dev)
+        _on_device(sp, lambda dev: sp.start_playback(device_id=dev))
         return "Lecture reprise."
     kind = kind if kind in ("track", "artist", "album", "playlist") else "track"
     items = [i for i in sp.search(q=query, type=kind, limit=3)[kind + "s"]["items"] if i]
@@ -578,9 +658,9 @@ def spotify_play(ctx, query="", kind="track"):
         return f"Rien trouvé sur Spotify pour « {query} »."
     it = items[0]
     if kind == "track":
-        sp.start_playback(device_id=dev, uris=[it["uri"]])
+        _on_device(sp, lambda dev: sp.start_playback(device_id=dev, uris=[it["uri"]]))
         return f"Lecture : {it['name']} — {', '.join(a['name'] for a in it['artists'])}"
-    sp.start_playback(device_id=dev, context_uri=it["uri"])
+    _on_device(sp, lambda dev: sp.start_playback(device_id=dev, context_uri=it["uri"]))
     return f"Lecture ({kind}) : {it['name']}"
 
 
@@ -591,21 +671,22 @@ def spotify_play(ctx, query="", kind="track"):
       required=["action"], label="Je contrôle Spotify")
 def spotify_control(ctx, action, volume_percent=None):
     sp = _spotify(ctx)
-    dev = _device(sp)
     if action == "pause":
-        sp.pause_playback(device_id=dev)
+        do = lambda dev: sp.pause_playback(device_id=dev)  # noqa: E731
     elif action == "resume":
-        sp.start_playback(device_id=dev)
+        do = lambda dev: sp.start_playback(device_id=dev)  # noqa: E731
     elif action == "next":
-        sp.next_track(device_id=dev)
+        do = lambda dev: sp.next_track(device_id=dev)  # noqa: E731
     elif action == "previous":
-        sp.previous_track(device_id=dev)
+        do = lambda dev: sp.previous_track(device_id=dev)  # noqa: E731
     elif action == "volume":
-        sp.volume(max(0, min(100, int(volume_percent if volume_percent is not None else 50))), device_id=dev)
+        vol = max(0, min(100, int(volume_percent if volume_percent is not None else 50)))
+        do = lambda dev: sp.volume(vol, device_id=dev)  # noqa: E731
     elif action in ("shuffle_on", "shuffle_off"):
-        sp.shuffle(action == "shuffle_on", device_id=dev)
+        do = lambda dev: sp.shuffle(action == "shuffle_on", device_id=dev)  # noqa: E731
     else:
         raise ToolError(f"Action inconnue : {action}")
+    _on_device(sp, do)
     return f"OK ({action})."
 
 

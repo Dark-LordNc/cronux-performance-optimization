@@ -5,6 +5,7 @@ Principe de sécurité : Cronux ne supprime QUE des dossiers de cache/temporaire
 Pour désinstaller un jeu, Cronux lance le désinstalleur officiel — il ne supprime pas les dossiers à la main."""
 import ctypes
 import os
+import re
 import shutil
 import string
 import time
@@ -23,7 +24,6 @@ def cache_targets():
     """Liste des caches sûrs à nettoyer : (clé, libellé, chemin, 'contenu' ou 'corbeille')."""
     local = _env("LOCALAPPDATA")
     appdata = _env("APPDATA")
-    home = os.path.expanduser("~")
     t = [
         ("temp_user", "Fichiers temporaires (utilisateur)", _env("TEMP"), "contenu"),
         ("temp_win", "Fichiers temporaires (Windows)", r"C:\Windows\Temp", "contenu"),
@@ -37,7 +37,11 @@ def cache_targets():
     # Profils Firefox (cache2)
     ff = os.path.join(appdata, r"Mozilla\Firefox\Profiles")
     if os.path.isdir(ff):
-        for prof in os.listdir(ff):
+        try:
+            profiles = os.listdir(ff)
+        except OSError:
+            profiles = []
+        for prof in profiles:
             c = os.path.join(ff, prof, "cache2")
             if os.path.isdir(c):
                 t.append((f"ff_{prof}", "Cache Firefox", c, "contenu"))
@@ -46,7 +50,7 @@ def cache_targets():
 
 def _dir_size(path, deadline):
     total = 0
-    for dirpath, dirnames, files in os.walk(path):
+    for dirpath, _, files in os.walk(path):
         for f in files:
             try:
                 total += os.path.getsize(os.path.join(dirpath, f))
@@ -61,8 +65,6 @@ def _recycle_size():
     if not IS_WIN:
         return 0
     try:
-        SHQUERYRBINFO = ctypes.c_uint64 * 3  # cbSize, i64Size, i64NumItems (approx layout)
-
         class RBINFO(ctypes.Structure):
             _fields_ = [("cbSize", ctypes.c_uint32), ("i64Size", ctypes.c_uint64),
                         ("i64NumItems", ctypes.c_uint64)]
@@ -86,12 +88,26 @@ def empty_recycle_bin():
         return False
 
 
+def _is_link(entry):
+    """Lien symbolique ou jonction Windows : on ne le suit JAMAIS (il peut pointer vers tes documents)."""
+    try:
+        return entry.is_symlink() or bool(getattr(entry, "is_junction", lambda: False)())
+    except OSError:
+        return True
+
+
 def _clear_contents(path):
     """Supprime le CONTENU d'un dossier (pas le dossier lui-même). Ignore les fichiers verrouillés."""
     freed = 0
-    for entry in os.scandir(path):
+    try:
+        entries = list(os.scandir(path))
+    except OSError:
+        return 0  # dossier disparu ou protégé : avant, ça faisait planter tout le nettoyage
+    for entry in entries:
         try:
-            if entry.is_file() or entry.is_symlink():
+            if _is_link(entry):
+                os.unlink(entry.path)  # supprime le lien lui-même, pas sa cible
+            elif entry.is_file():
                 size = entry.stat(follow_symlinks=False).st_size
                 os.remove(entry.path)
                 freed += size
@@ -100,7 +116,7 @@ def _clear_contents(path):
                 shutil.rmtree(entry.path, ignore_errors=True)
                 if not os.path.exists(entry.path):
                     freed += size
-        except (OSError, PermissionError):
+        except OSError:
             continue  # fichier en cours d'utilisation : on laisse
     return freed
 
@@ -154,10 +170,11 @@ def clean(keys):
 
 # ───────── Jeux peu joués ─────────
 
-def _last_used(game_name, root):
+def _last_used(game_name, root, deadline=None):
     """Estime la dernière utilisation d'un jeu (fichier le plus récent côté sauvegardes, sinon dossier)."""
     import games
     newest = 0
+    deadline = deadline or time.time() + 3
     for base in games.save_dirs(game_name) or []:
         for dirpath, _, files in os.walk(base):
             for f in files:
@@ -165,6 +182,8 @@ def _last_used(game_name, root):
                     newest = max(newest, os.path.getmtime(os.path.join(dirpath, f)))
                 except OSError:
                     pass
+            if time.time() > deadline:  # gros dossier « Documents » : on s'arrête à temps
+                break
     try:
         newest = max(newest, os.path.getmtime(root))
     except OSError:
@@ -176,10 +195,10 @@ def unused_games(ctx, days=45, deadline=20):
     """Liste les jeux installés non utilisés depuis `days` jours, avec leur taille."""
     import games
     installed = games.installed_games(ctx)
-    now, cutoff = time.time(), days * 86400
-    out, stop = [], time.time() + deadline
+    now = time.time()
+    out, stop = [], now + deadline
     for root, name in installed.items():
-        last = _last_used(name, root)
+        last = _last_used(name, root, min(stop, time.time() + 3))
         inactive_days = int((now - last) / 86400) if last else None
         size, _ = _dir_size(root, min(stop, time.time() + 4))
         out.append({"name": name, "root": root, "size": size,
@@ -198,8 +217,11 @@ def _steam_appid(root):
     folder = os.path.basename(root)
     if os.path.basename(steamapps).lower() != "steamapps":
         return None
-    import re
-    for f in os.listdir(steamapps):
+    try:
+        manifests = os.listdir(steamapps)
+    except OSError:
+        return None
+    for f in manifests:
         if f.startswith("appmanifest_") and f.endswith(".acf"):
             try:
                 txt = open(os.path.join(steamapps, f), encoding="utf-8", errors="ignore").read()
@@ -218,7 +240,11 @@ def uninstall_game(root):
     if appid:
         _open(f"steam://uninstall/{appid}")
         return "Fenêtre de désinstallation Steam ouverte."
-    for f in os.listdir(root):
+    try:
+        files = os.listdir(root)
+    except OSError:
+        files = []
+    for f in files:
         low = f.lower()
         if low.startswith(("unins", "uninstall")) and low.endswith(".exe"):
             _open(os.path.join(root, f))

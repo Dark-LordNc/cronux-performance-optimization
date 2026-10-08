@@ -35,8 +35,7 @@ TEXT_EXT = {".json", ".xml", ".ini", ".cfg", ".txt", ".lua", ".csv", ".tsv", ".y
 SKIP_EXT = {".dll", ".exe", ".png", ".jpg", ".jpeg", ".dds", ".tga", ".bmp", ".wav", ".ogg", ".mp3",
             ".mp4", ".webm", ".bik", ".bk2", ".usm", ".wem", ".bnk", ".ttf", ".otf", ".fnt", ".pdb",
             ".so", ".mov", ".avi", ".ktx", ".ico", ".cur", ".pyc", ".zip", ".7z", ".rar", ".cab", ".msi",
-            ".ogv", ".flac", ".psd", ".exr", ".hdr", ".archive", ".pak", ".ucas", ".utoc", ".bundle",
-            ".bnk"}
+            ".ogv", ".flac", ".psd", ".exr", ".hdr", ".archive", ".pak", ".ucas", ".utoc", ".bundle"}
 MAX_TEXT = 30 * 1024 * 1024
 MAX_BIN = 64 * 1024 * 1024
 
@@ -70,13 +69,15 @@ def _norm(s):
 
 def _match_library(exe, ctx):
     low = exe.lower().replace("/", "\\")
-    customs = [p.lower().rstrip("\\") for p in ctx.config.get("game_folders", [])]
+    # Le sélecteur de dossier de Windows (Tk) renvoie « D:/Jeux » : on normalise en « d:\\jeux »,
+    # sinon un jeu installé dans un dossier perso n'était jamais reconnu.
+    customs = [p.replace("/", "\\").lower().rstrip("\\") for p in ctx.config.get("game_folders", []) if p]
     for hint in customs + LIBRARY_HINTS:
-        key = (hint if hint.startswith("\\") else hint) + "\\"
+        key = hint + "\\"
         idx = low.find(key)
         if idx >= 0:
-            rest = exe[idx + len(key):]
-            game = rest.replace("/", "\\").split("\\")[0]
+            rest = exe[idx + len(key):].replace("/", "\\")
+            game = rest.split("\\")[0]
             if game and "\\" in rest:
                 return exe[:idx + len(key) + len(game)], game
     return None, None
@@ -97,6 +98,14 @@ def _anticheat(root, running):
     return found
 
 
+def _listdir(path):
+    """os.listdir qui ne plante pas sur un dossier protégé ou disparu."""
+    try:
+        return os.listdir(path)
+    except OSError:
+        return []
+
+
 def save_dirs(game):
     n = _norm(game)
     if len(n) < 3:
@@ -113,12 +122,12 @@ def save_dirs(game):
                os.path.join(home, "Documents")]
     locallow = os.path.join(home, "AppData", "LocalLow")
     if os.path.isdir(locallow):
-        parents += [os.path.join(locallow, c) for c in os.listdir(locallow)]
+        parents += [os.path.join(locallow, c) for c in _listdir(locallow)]
     out = []
     for parent in parents:
         if not os.path.isdir(parent):
             continue
-        for child in os.listdir(parent):
+        for child in _listdir(parent):
             cn = _norm(child)
             full = os.path.join(parent, child)
             if os.path.isdir(full) and cn and (n in cn or (len(cn) >= 5 and cn in n)):
@@ -157,17 +166,19 @@ def installed_games(ctx):
     libs = []
     for steam in (r"C:\Program Files (x86)\Steam", r"C:\Program Files\Steam"):
         vdf = os.path.join(steam, "steamapps", "libraryfolders.vdf")
-        if os.path.exists(vdf):
+        try:
             with open(vdf, encoding="utf-8", errors="ignore") as f:
                 for p in re.findall(r'"path"\s+"(.+?)"', f.read()):
                     libs.append(os.path.join(p.replace("\\\\", "\\"), "steamapps", "common"))
+        except OSError:
+            pass
     libs += [r"C:\Program Files\Epic Games", r"C:\Riot Games", r"C:\XboxGames",
              r"C:\Program Files (x86)\GOG Galaxy\Games", r"C:\Program Files\EA Games"]
     libs += ctx.config.get("game_folders", [])
     out = {}
     for lib in libs:
         if os.path.isdir(lib):
-            for g in os.listdir(lib):
+            for g in _listdir(lib):
                 full = os.path.join(lib, g)
                 if os.path.isdir(full):
                     out[full] = g
@@ -225,6 +236,39 @@ def _variants(item):
     base = " ".join(item.lower().split())
     return list(dict.fromkeys(v for v in (base, base.replace(" ", "_"), base.replace(" ", ""),
                                           base.replace(" ", "-")) if len(v) >= 3))
+
+
+def _patterns(variants):
+    """Préparés une seule fois par recherche : une regex texte insensible à la casse, et les
+    séquences d'octets à chercher dans les binaires (UTF-8 et UTF-16, en minuscules)."""
+    text_re = re.compile("|".join(re.escape(v) for v in variants), re.I)
+    needles = list(dict.fromkeys(v.lower().encode(enc) for v in variants for enc in ("utf-8", "utf-16-le")))
+    return text_re, needles
+
+
+CHUNK = 4 * 1024 * 1024
+
+
+def _find_in_binary(path, needles):
+    """Cherche dans un binaire par morceaux de 4 Mo (avant : fichier entier + copie en minuscules,
+    jusqu'à 128 Mo de RAM par fichier). bytes.lower() + find() restent les opérations les plus
+    rapides de Python pour ça (bien plus qu'une regex insensible à la casse)."""
+    overlap = max(len(n) for n in needles) - 1
+    with open(path, "rb") as fh:
+        offset, tail = 0, b""
+        while True:
+            chunk = fh.read(CHUNK)
+            if not chunk:
+                return None
+            low = (tail + chunk).lower()
+            hits = [p for p in (low.find(n) for n in needles) if p >= 0]
+            if hits:
+                pos = offset - len(tail) + min(hits)
+                fh.seek(max(0, pos - 400))
+                window = fh.read(800 + min(pos, 400))
+                return _strings_around(window, min(pos, 400))
+            tail = chunk[-overlap:] if overlap else b""
+            offset += len(chunk)
 
 
 def _strings_around(data, pos):
@@ -356,56 +400,52 @@ def search_game_files(ctx, item, game=None):
                  if os.path.isdir(p)]
     else:
         roots = [root] + save_dirs(name)
+    text_re, needles = _patterns(variants)
     hits, scanned, skipped, deadline = [], 0, 0, time.time() + 45
+    timed_out = False
     for base in roots:
         for dirpath, dirnames, files in os.walk(base):
             dirnames[:] = [d for d in dirnames if d.lower() not in ("easyanticheat", "battleye", "redist", "_commonredist")]
             for f in files:
-                path = os.path.join(dirpath, f)
                 ext = os.path.splitext(f)[1].lower()
                 if ext in SKIP_EXT:
                     continue
+                path = os.path.join(dirpath, f)
                 try:
                     size = os.path.getsize(path)
                 except OSError:
                     continue
-                rel = os.path.relpath(path, base)
                 try:
                     if ext in TEXT_EXT and size <= MAX_TEXT:
                         scanned += 1
                         n = 0
                         with open(path, "r", encoding="utf-8", errors="ignore") as fh:
                             for ln, line in enumerate(fh, 1):
-                                if any(v in line.lower() for v in variants):
-                                    hits.append(f"{rel} (ligne {ln}) : {line.strip()[:220]}")
+                                if text_re.search(line):
+                                    hits.append(f"{os.path.relpath(path, base)} (ligne {ln}) : {line.strip()[:220]}")
                                     n += 1
                                     if n >= 4:
                                         break
                     elif size <= MAX_BIN:
                         scanned += 1
-                        with open(path, "rb") as fh:
-                            data = fh.read()
-                        low = data.lower()
-                        for v in variants:
-                            pos = -1
-                            for enc in ("utf-8", "utf-16-le"):
-                                pos = low.find(v.encode(enc))
-                                if pos >= 0:
-                                    break
-                            if pos >= 0:
-                                hits.append(f"{rel} (binaire) : {_strings_around(data, pos)}")
-                                break
+                        found = _find_in_binary(path, needles)
+                        if found is not None:
+                            hits.append(f"{os.path.relpath(path, base)} (binaire) : {found}")
                     else:
                         skipped += 1
-                except OSError:
+                except (OSError, ValueError):
                     continue
-                if len(hits) >= 30 or time.time() > deadline:
+                if time.time() > deadline:
+                    timed_out = True
+                if len(hits) >= 30 or timed_out:
                     break
-            if len(hits) >= 30 or time.time() > deadline:
+            if len(hits) >= 30 or timed_out:
                 break
+        if len(hits) >= 30 or timed_out:
+            break  # avant, la recherche repartait sur le dossier suivant même après le délai
     head = (f"Recherche de « {item} » dans {name} : {scanned} fichiers lisibles lus"
             + (f", {skipped} archives trop grosses ignorées" if skipped else "")
-            + (" (temps limite atteint)" if time.time() > deadline else ""))
+            + (" (temps limite atteint)" if timed_out else ""))
     parts = [head]
     if prof and prof.get("note"):
         parts.append(prof["note"])
@@ -436,13 +476,9 @@ def read_game_file(ctx, path, query=None, line=None):
         center = center or 1
         start = max(0, center - 25)
         return "".join(f"{i + 1}: {l}" for i, l in enumerate(lines[start:start + 50], start))[:6000]
-    with open(path, "rb") as fh:
-        data = fh.read(MAX_BIN)
     if query:
-        low = data.lower()
-        for enc in ("utf-8", "utf-16-le"):
-            pos = low.find(query.lower().encode(enc))
-            if pos >= 0:
-                return _strings_around(data, pos)
-        return "Mot non trouvé dans ce fichier."
-    return " | ".join(s.decode("ascii") for s in re.findall(rb"[\x20-\x7e]{6,}", data[:200000]))[:5000]
+        found = _find_in_binary(path, _patterns([query])[1])
+        return found if found is not None else "Mot non trouvé dans ce fichier."
+    with open(path, "rb") as fh:
+        data = fh.read(200000)
+    return " | ".join(s.decode("ascii") for s in re.findall(rb"[\x20-\x7e]{6,}", data))[:5000]

@@ -1,8 +1,6 @@
 """Mode Gaming (fermer/relancer les apps gourmandes) et capture d'écran + partage Discord."""
 import datetime
 import os
-import subprocess
-import sys
 
 from config import APP_DIR
 from tools import IS_WIN, ToolError, _open, tool
@@ -20,7 +18,10 @@ NOWIN = 0x08000000 if IS_WIN else 0
 
 
 def _close_list(ctx):
-    extra = [x.lower() for x in ctx.config.get("gaming_close", [])]
+    # Une entrée vide correspondait à TOUS les processus (« "" in nom » est toujours vrai) : on l'ignore.
+    # « obs64.exe » est ramené à « obs64 », car on compare au nom sans « .exe ».
+    extra = [x.strip().lower().removesuffix(".exe") for x in ctx.config.get("gaming_close", [])
+             if isinstance(x, str) and x.strip().lower().removesuffix(".exe")]
     return list(dict.fromkeys(DEFAULT_CLOSE + extra))
 
 
@@ -46,6 +47,7 @@ def gaming_on(ctx):
     closed = sorted(set(closed))
     if paths:
         try:
+            os.makedirs(APP_DIR, exist_ok=True)
             with open(CLOSED_FILE, "w", encoding="utf-8") as f:
                 f.write("\n".join(sorted(set(paths.values()))))
         except OSError:
@@ -60,7 +62,8 @@ def gaming_off(ctx):
     if not os.path.exists(CLOSED_FILE):
         return "Rien à relancer."
     try:
-        paths = [l.strip() for l in open(CLOSED_FILE, encoding="utf-8").read().splitlines() if l.strip()]
+        with open(CLOSED_FILE, encoding="utf-8") as f:
+            paths = [l.strip() for l in f.read().splitlines() if l.strip()]
     except OSError:
         return "Rien à relancer."
     relaunched = 0

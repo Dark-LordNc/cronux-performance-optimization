@@ -1,5 +1,6 @@
 """Mémoire à long terme : faits retenus, habitudes d'utilisation et conversation précédente.
-Tout est stocké localement dans %APPDATA%\\AssistantIA\\memoire.json."""
+Tout est stocké localement dans %APPDATA%\\Cronux\\memoire.json."""
+import copy
 import datetime
 import json
 import os
@@ -13,16 +14,46 @@ _LOCK = threading.Lock()
 MAX_FACTS = 200
 
 
-def _load():
+_CACHE = {"stamp": None, "data": None}
+
+
+def _stamp():
     try:
-        with open(PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
+        st = os.stat(PATH)
+        return st.st_mtime_ns, st.st_size
+    except OSError:
+        return None
+
+
+def _normalize(data):
+    if not isinstance(data, dict):
         data = {}
     data.setdefault("facts", [])
     data.setdefault("habits", {})
     data.setdefault("last_conversation", [])
     return data
+
+
+def _peek():
+    """Données en LECTURE SEULE (ne pas modifier) : relit le fichier seulement s'il a changé.
+    La mémoire est lue à chaque étape de réflexion et pour chaque notification : sans ce cache,
+    le JSON était relu et re-parsé des dizaines de fois par minute."""
+    stamp = _stamp()
+    if _CACHE["data"] is not None and stamp == _CACHE["stamp"]:
+        return _CACHE["data"]
+    try:
+        with open(PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+    data = _normalize(data)
+    _CACHE.update(stamp=stamp, data=data)
+    return data
+
+
+def _load():
+    """Copie modifiable des données (pour les écritures, sous _LOCK)."""
+    return copy.deepcopy(_peek())
 
 
 def _save(data):
@@ -31,6 +62,7 @@ def _save(data):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     os.replace(tmp, PATH)
+    _CACHE.update(stamp=_stamp(), data=_normalize(copy.deepcopy(data)))
 
 
 # ───────── Faits retenus (l'IA les gère elle-même via des outils) ─────────
@@ -115,7 +147,7 @@ def save_conversation(history):
 
 
 def last_conversation():
-    return _load()["last_conversation"]
+    return copy.deepcopy(_peek()["last_conversation"])
 
 
 def clear_all():
@@ -124,7 +156,7 @@ def clear_all():
 
 
 def all_facts():
-    return list(_load()["facts"])
+    return copy.deepcopy(_peek()["facts"])
 
 
 def delete_fact(fact_id):
@@ -137,7 +169,7 @@ def add_fact(text):
 
 def habits_summary():
     out = []
-    for cat, entries in _load()["habits"].items():
+    for cat, entries in _peek()["habits"].items():
         for key, h in sorted(entries.items(), key=lambda kv: -kv[1]["count"]):
             if h["count"] >= 2:
                 moment = max(h["moments"], key=h["moments"].get)
@@ -148,7 +180,7 @@ def habits_summary():
 # ───────── Résumé injecté dans les instructions de l'IA ─────────
 
 def prompt_block():
-    data = _load()
+    data = _peek()
     parts = []
     if data["facts"]:
         parts.append("CE QUE TU SAIS SUR L'UTILISATEUR (id: souvenir) :\n" +

@@ -2,12 +2,25 @@
 
 Pourquoi un bot et pas ton compte : Discord interdit d'automatiser un compte utilisateur
 (« selfbot ») et bannit les comptes qui le font."""
+import json
+import os
+import threading
+
 import requests
 
 from tools import ToolError, _open, tool
 
 API = "https://discord.com/api/v10"
-_CACHE = {"channels": None}
+_CACHE = {"channels": None, "token": None}
+_TLS = threading.local()
+
+
+def _session():
+    """Session HTTP réutilisée (une par thread) : lister les salons fait un appel par serveur."""
+    s = getattr(_TLS, "session", None)
+    if s is None:
+        s = _TLS.session = requests.Session()
+    return s
 
 
 def _req(ctx, method, path, **kw):
@@ -16,7 +29,7 @@ def _req(ctx, method, path, **kw):
         raise ToolError("Pour lire ou écrire dans tes serveurs, il faut configurer un bot Discord "
                         "(gratuit, 5 min, voir LISEZMOI) puis coller son token dans les réglages ⚙. "
                         "Les messages que tu reçois restent visibles via les notifications.")
-    r = requests.request(method, API + path, headers={"Authorization": f"Bot {token}"}, timeout=15, **kw)
+    r = _session().request(method, API + path, headers={"Authorization": f"Bot {token}"}, timeout=15, **kw)
     if r.status_code == 401:
         raise ToolError("Le token du bot Discord est invalide.")
     if r.status_code == 403:
@@ -27,7 +40,6 @@ def _req(ctx, method, path, **kw):
 
 def send_file(ctx, channel, file_path, message=""):
     """Envoie un fichier (ex. une capture d'écran) dans un salon Discord via le bot."""
-    import os
     token = ctx.config.get("discord_bot_token", "").strip()
     if not token:
         raise ToolError("Il faut configurer le bot Discord (⚙ → connexion Discord) pour envoyer un fichier.")
@@ -36,8 +48,8 @@ def send_file(ctx, channel, file_path, message=""):
     c = _find_channel(ctx, channel)
     with open(file_path, "rb") as fh:
         files = {"files[0]": (os.path.basename(file_path), fh, "application/octet-stream")}
-        data = {"payload_json": __import__("json").dumps({"content": message[:2000]})}
-        r = requests.post(f"{API}/channels/{c['id']}/messages",
+        data = {"payload_json": json.dumps({"content": (message or "")[:2000]})}
+        r = _session().post(f"{API}/channels/{c['id']}/messages",
                           headers={"Authorization": f"Bot {token}"}, data=data, files=files, timeout=60)
     if r.status_code == 403:
         raise ToolError("Le bot n'a pas la permission d'envoyer dans ce salon.")
@@ -46,13 +58,14 @@ def send_file(ctx, channel, file_path, message=""):
 
 
 def _channels(ctx):
-    if _CACHE["channels"] is None:
+    token = ctx.config.get("discord_bot_token", "").strip()
+    if _CACHE["channels"] is None or _CACHE["token"] != token:  # nouveau bot → nouvelle liste
         out = []
         for g in _req(ctx, "GET", "/users/@me/guilds"):
             for c in _req(ctx, "GET", f"/guilds/{g['id']}/channels"):
                 if c.get("type") in (0, 5):  # salons texte / annonces
                     out.append({"id": c["id"], "name": c["name"], "guild": g["name"], "guild_id": g["id"]})
-        _CACHE["channels"] = out
+        _CACHE.update(channels=out, token=token)
     return _CACHE["channels"]
 
 

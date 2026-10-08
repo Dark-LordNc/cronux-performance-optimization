@@ -1,4 +1,5 @@
 """Configuration de Cronux (stockée dans %APPDATA%\\Cronux\\config.json)."""
+import copy
 import json
 import os
 
@@ -89,17 +90,45 @@ HELP_LINKS = {
 }
 
 
+_CACHE = {"stamp": None, "cfg": None}
+
+
+def _stamp():
+    try:
+        st = os.stat(CONFIG_PATH)
+        return st.st_mtime_ns, st.st_size
+    except OSError:
+        return None
+
+
 def load() -> dict:
-    os.makedirs(APP_DIR, exist_ok=True)
+    """Renvoie une copie de la configuration. Relit le fichier seulement s'il a changé sur le disque
+    (load() est appelé très souvent : à chaque demande et toutes les quelques secondes par la surveillance
+    des notifications)."""
+    stamp = _stamp()
+    if stamp is not None and stamp == _CACHE["stamp"]:
+        return copy.deepcopy(_CACHE["cfg"])
     cfg = dict(DEFAULTS)
-    if os.path.exists(CONFIG_PATH):
+    stored = {}
+    if stamp is not None:
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                cfg.update(json.load(f))
+                stored = json.load(f)
+            if not isinstance(stored, dict):
+                raise ValueError("config.json n'est pas un objet JSON")
         except Exception:
-            pass
-    # Ajoute les clés manquantes pour que l'utilisateur les voie dans le fichier
-    save(cfg)
+            # Fichier abîmé : on le met de côté au lieu d'écraser les réglages de l'utilisateur.
+            try:
+                os.replace(CONFIG_PATH, CONFIG_PATH + ".bak")
+            except OSError:
+                pass
+            stored = {}
+    cfg.update(stored)
+    if any(k not in stored for k in DEFAULTS):
+        # Ajoute les clés manquantes pour que l'utilisateur les voie dans le fichier
+        save(cfg)
+    else:
+        _CACHE.update(stamp=stamp, cfg=copy.deepcopy(cfg))
     return cfg
 
 
@@ -112,5 +141,8 @@ def update(changes: dict) -> dict:
 
 def save(cfg: dict) -> None:
     os.makedirs(APP_DIR, exist_ok=True)
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, CONFIG_PATH)  # écriture atomique : jamais de config.json à moitié écrit
+    _CACHE.update(stamp=_stamp(), cfg=copy.deepcopy(cfg))

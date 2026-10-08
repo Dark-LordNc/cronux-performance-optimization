@@ -1,7 +1,10 @@
 """Surveillance matérielle : CPU, RAM, disque, et GPU NVIDIA (via nvidia-smi)."""
+import os
 import shutil
 import subprocess
 import sys
+import threading
+import time
 
 from tools import tool
 
@@ -10,13 +13,34 @@ GB = 1024 ** 3
 GPU_TEMP_ALERT = 83  # °C : seuil d'alerte
 
 
+_SMI = {"path": False}                      # False = pas encore cherché
+_GPU_CACHE = {"time": 0.0, "data": []}
+_GPU_LOCK = threading.Lock()
+GPU_CACHE_SECONDS = 1.5  # l'overlay et le panneau Gaming interrogent le GPU en même temps
+
+
 def _nvidia_smi():
-    return shutil.which("nvidia-smi") or (
-        r"C:\Windows\System32\nvidia-smi.exe" if IS_WIN else None)
+    if _SMI["path"] is False:
+        path = shutil.which("nvidia-smi")
+        if not path and IS_WIN:
+            candidate = r"C:\Windows\System32\nvidia-smi.exe"
+            path = candidate if os.path.exists(candidate) else None
+        _SMI["path"] = path
+    return _SMI["path"]
 
 
 def gpu_status():
-    """Renvoie une liste de GPU NVIDIA (ou [] si pas de carte/nvidia-smi)."""
+    """Renvoie une liste de GPU NVIDIA (ou [] si pas de carte/nvidia-smi).
+    Résultat gardé ~1,5 s : lancer nvidia-smi coûte cher et plusieurs écrans le demandent."""
+    with _GPU_LOCK:
+        if time.monotonic() - _GPU_CACHE["time"] < GPU_CACHE_SECONDS:
+            return [dict(g) for g in _GPU_CACHE["data"]]
+        data = _query_gpus()
+        _GPU_CACHE.update(time=time.monotonic(), data=data)
+        return [dict(g) for g in data]
+
+
+def _query_gpus():
     exe = _nvidia_smi()
     if not exe:
         return []
@@ -84,13 +108,21 @@ def snapshot():
 def hardware_status(ctx):
     if not IS_WIN:
         return "Surveillance disponible sous Windows."
-    d = snapshot()
+    return format_snapshot(snapshot())
+
+
+def _fmt0(value, unit):
+    """« 42 % » ; « ? % » si la valeur est indisponible (nvidia-smi peut renvoyer « [N/A] »)."""
+    return f"{value:.0f} {unit}" if value is not None else f"? {unit}"
+
+
+def format_snapshot(d):
     lines = [f"Processeur : {d['cpu']:.0f} %" + (f" · {d['cpu_temp']:.0f} °C" if d['cpu_temp'] else "")]
     lines.append(f"Mémoire : {d['ram_percent']:.0f} % ({d['ram_used'] / GB:.1f} / {d['ram_total'] / GB:.1f} Go)")
     if d["gpus"]:
         for g in d["gpus"]:
-            seg = f"GPU {g['name']} : {g['util']:.0f} % · {g['temp']:.0f} °C"
-            if g["mem_total"]:
+            seg = f"GPU {g['name']} : {_fmt0(g['util'], '%')} · {_fmt0(g['temp'], '°C')}"
+            if g["mem_total"] and g["mem_used"] is not None:
                 seg += f" · VRAM {g['mem_used'] / 1024:.1f}/{g['mem_total'] / 1024:.1f} Go"
             if g["power"]:
                 seg += f" · {g['power']:.0f} W"

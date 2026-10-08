@@ -9,7 +9,6 @@ Jetons stockés localement dans %APPDATA%\\Cronux\\discord_oauth.json."""
 import http.server
 import json
 import os
-import socket
 import threading
 import time
 import urllib.parse
@@ -23,6 +22,7 @@ API = "https://discord.com/api/v10"
 TOKEN_PATH = os.path.join(APP_DIR, "discord_oauth.json")
 SCOPES = "identify guilds"
 UA = {"User-Agent": "Cronux (local, OAuth)"}
+_CACHE = {}
 
 
 def _save_token(data):
@@ -47,6 +47,7 @@ def is_connected():
 
 
 def disconnect():
+    _CACHE.clear()  # sinon le panneau affichait encore « Connecté en tant que… »
     try:
         os.remove(TOKEN_PATH)
     except OSError:
@@ -56,16 +57,6 @@ def disconnect():
 # Port FIXE : il doit correspondre exactement au Redirect enregistré dans l'app Discord.
 REDIRECT_PORT = 53110
 REDIRECT_URI = f"http://127.0.0.1:{REDIRECT_PORT}/callback"
-
-
-def _port_free():
-    try:
-        s = socket.socket()
-        s.bind(("127.0.0.1", REDIRECT_PORT))
-        s.close()
-        return True
-    except OSError:
-        return False
 
 
 def authorize_url(client_id, redirect_uri, state):
@@ -87,12 +78,22 @@ class _Catcher(http.server.BaseHTTPRequestHandler):
     code = None
     state = None
     want_state = None
+    got = threading.Event()
 
     def do_GET(self):
-        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-        _Catcher.code = q.get("code", [None])[0]
-        _Catcher.state = q.get("state", [None])[0]
-        ok = _Catcher.code and _Catcher.state == _Catcher.want_state
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path != "/callback":
+            # Le navigateur demande aussi /favicon.ico : avant, cette 2e requête effaçait le code reçu.
+            self.send_response(404)
+            self.end_headers()
+            return
+        q = urllib.parse.parse_qs(parsed.query)
+        code, state = q.get("code", [None])[0], q.get("state", [None])[0]
+        ok = bool(code) and state == _Catcher.want_state
+        if ok or _Catcher.code is None:
+            _Catcher.code, _Catcher.state = code, state
+        if q.get("error") or ok:
+            _Catcher.got.set()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
@@ -115,20 +116,21 @@ def connect(client_id, client_secret, on_status=lambda s: None, timeout=180):
     state = os.urandom(8).hex()
     _Catcher.code = _Catcher.state = None
     _Catcher.want_state = state
+    _Catcher.got.clear()
 
     try:
         server = http.server.HTTPServer(("127.0.0.1", REDIRECT_PORT), _Catcher)
     except OSError:
         return False, (f"Le port {REDIRECT_PORT} est déjà utilisé par un autre programme. "
                        "Ferme-le et réessaie (ce port doit rester libre pour la connexion Discord).")
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    on_status("Ouverture du navigateur pour te connecter à Discord…")
-    webbrowser.open(authorize_url(client_id, redirect_uri, state))
-
-    deadline = time.time() + timeout
-    while _Catcher.code is None and time.time() < deadline:
-        time.sleep(0.4)
-    server.shutdown()
+    try:
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True).start()
+        on_status("Ouverture du navigateur pour te connecter à Discord…")
+        webbrowser.open(authorize_url(client_id, redirect_uri, state))
+        _Catcher.got.wait(timeout)  # réveillé dès la réponse, au lieu de vérifier toutes les 0,4 s
+    finally:
+        server.shutdown()
+        server.server_close()  # libère le port : avant, une 2e tentative échouait (« port déjà utilisé »)
 
     if _Catcher.code is None:
         return False, "Connexion annulée ou expirée."
@@ -158,9 +160,6 @@ def _headers():
     if not tok:
         return None
     return {"Authorization": f"{tok.get('token_type', 'Bearer')} {tok['access_token']}", **UA}
-
-
-_CACHE = {}
 
 
 def account(force=False):

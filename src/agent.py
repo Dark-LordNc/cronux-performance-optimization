@@ -1,6 +1,7 @@
 """Le « cerveau » de Cronux : dialogue avec Ollama, exécution des outils, tri des notifications."""
 import json
 import os
+import threading
 import time
 
 import requests
@@ -20,6 +21,22 @@ MAX_STEPS = 12
 MAX_HISTORY = 44
 
 
+_TLS = threading.local()
+
+
+def _session():
+    """Une session HTTP par thread : la connexion à Ollama est réutilisée (keep-alive) au lieu
+    d'ouvrir un nouveau socket à chaque appel."""
+    s = getattr(_TLS, "session", None)
+    if s is None:
+        s = _TLS.session = requests.Session()
+    return s
+
+
+def _base_url(cfg):
+    return (cfg.get("ollama_url") or config.DEFAULTS["ollama_url"]).rstrip("/")
+
+
 def _post_chat(cfg, payload, timeout=300):
     opts = payload.setdefault("options", {})
     opts.setdefault("num_ctx", int(cfg.get("context_tokens", 16384)))
@@ -27,16 +44,36 @@ def _post_chat(cfg, payload, timeout=300):
     opts.setdefault("top_p", 0.9)
     # Garde le modèle chargé : sinon le recharger prend 10-20 s et retarde les notifications
     payload.setdefault("keep_alive", f"{int(cfg.get('keep_model_loaded_minutes', 60))}m")
-    url = cfg["ollama_url"].rstrip("/") + "/api/chat"
+    url = _base_url(cfg) + "/api/chat"
     try:
-        r = requests.post(url, json=payload, timeout=timeout)
+        r = _session().post(url, json=payload, timeout=timeout)
     except requests.ConnectionError:
         raise RuntimeError("Ollama ne répond pas. Vérifie qu'il est lancé (icône du lama dans la barre des tâches).")
+    except requests.Timeout:
+        raise RuntimeError("Ollama met trop de temps à répondre. Essaie un modèle plus léger "
+                           "(⚙ → Modèle Ollama) ou baisse la mémoire de travail.")
     if r.status_code == 404:
         raise RuntimeError(f"Le modèle « {cfg['model']} » n'est pas installé. "
                            f"Ouvre un terminal et tape : ollama pull {cfg['model']}")
     r.raise_for_status()
     return r.json()["message"]
+
+
+def _installed_models(cfg):
+    """Liste des modèles installés dans Ollama, ou None s'il est injoignable."""
+    try:
+        r = _session().get(_base_url(cfg) + "/api/tags", timeout=5)
+        r.raise_for_status()
+        return [m["name"] for m in r.json().get("models", [])]
+    except Exception:
+        return None
+
+
+def _same_model(installed, wanted):
+    """Ollama ajoute « :latest » quand on ne précise pas de tag : « qwen2.5 » = « qwen2.5:latest »."""
+    def full(name):
+        return name if ":" in name else name + ":latest"
+    return full(installed.strip()) == full(wanted.strip())
 
 
 def _salvage_args(raw):
@@ -64,6 +101,7 @@ class Agent:
         self.confirm = confirm
         # Reprend la fin de la conversation précédente (même après redémarrage du PC)
         self.history = list(memory.last_conversation())
+        self._schemas = None
 
     def reset(self):
         self.history = []
@@ -123,20 +161,34 @@ class Agent:
 
     def _trimmed(self):
         h = self.history[-MAX_HISTORY:]
-        while h and h[0].get("role") != "user":  # ne pas commencer au milieu d'un appel d'outil
-            h = h[1:]
-        return h
+        start = 0
+        while start < len(h) and h[start].get("role") != "user":  # ne pas commencer au milieu d'un appel d'outil
+            start += 1
+        return h[start:]
+
+    def _tool_schemas(self):
+        # Les outils sont tous enregistrés à l'import : inutile de reconstruire la liste à chaque étape.
+        if self._schemas is None or len(self._schemas) != len(tools.REGISTRY):
+            self._schemas = tools.schemas()
+        return self._schemas
 
     def ask(self, text, on_status=lambda s: None):
         cfg = config.load()
         ctx = tools.Context(cfg, self.confirm)
         self.history.append({"role": "user", "content": text})
-        for step in range(MAX_STEPS):
+        # Garde l'historique en mémoire borné (seule la fin est envoyée au modèle de toute façon).
+        if len(self.history) > 4 * MAX_HISTORY:
+            self.history = self._trimmed()
+        # Instructions calculées UNE fois par demande : un préfixe identique d'une étape à l'autre
+        # permet à Ollama de réutiliser son cache (pas de re-lecture de tout le prompt à chaque outil).
+        system = {"role": "system", "content": self._system(cfg)}
+        schemas = self._tool_schemas()
+        for _ in range(MAX_STEPS):
             on_status("Réflexion…")
             msg = _post_chat(cfg, {
                 "model": cfg["model"],
-                "messages": [{"role": "system", "content": self._system(cfg)}] + self._trimmed(),
-                "tools": tools.schemas(),
+                "messages": [system] + self._trimmed(),
+                "tools": schemas,
                 "stream": False,
                 "options": {"temperature": 0.2},
             })
@@ -181,8 +233,9 @@ def classify_notifications(items, time_budget=8):
     if not items:
         return items
     pending = []
+    rules = notifications.learned_rules()
     for i in items:
-        rule = notifications.learned_rule(i)
+        rule = notifications.learned_rule(i, rules)
         if rule is None:
             pending.append(i)
         else:
@@ -230,21 +283,19 @@ def classify_notifications(items, time_budget=8):
 
 
 def model_installed(cfg=None, model=None):
+    """True / False, ou None si Ollama est injoignable."""
     cfg = cfg or config.load()
     model = model or cfg["model"]
-    try:
-        r = requests.get(cfg["ollama_url"].rstrip("/") + "/api/tags", timeout=5)
-        models = [m["name"] for m in r.json().get("models", [])]
-    except Exception:
-        return None  # Ollama injoignable
-    return any(m == model or m.split(":")[0] == model.split(":")[0] and m == model for m in models) or \
-        any(m == model for m in models)
+    models = _installed_models(cfg)
+    if models is None:
+        return None
+    return any(_same_model(m, model) for m in models)
 
 
 def pull_model(model, on_status=lambda s: None, cfg=None):
     """Télécharge un modèle via Ollama en montrant la progression. Renvoie (ok, message)."""
     cfg = cfg or config.load()
-    url = cfg["ollama_url"].rstrip("/") + "/api/pull"
+    url = _base_url(cfg) + "/api/pull"
     try:
         with requests.post(url, json={"model": model, "stream": True}, stream=True, timeout=3600) as r:
             r.raise_for_status()
@@ -271,12 +322,10 @@ def pull_model(model, on_status=lambda s: None, cfg=None):
 def check_ollama():
     """Renvoie None si tout va bien, sinon un message d'aide."""
     cfg = config.load()
-    try:
-        r = requests.get(cfg["ollama_url"].rstrip("/") + "/api/tags", timeout=5)
-        models = [m["name"] for m in r.json().get("models", [])]
-    except Exception:
+    models = _installed_models(cfg)
+    if models is None:
         return "⚠ Ollama ne semble pas lancé. Installe-le depuis ollama.com, lance-le, puis relance Cronux."
     want = cfg["model"]
-    if not any(m == want or m.split(":")[0] == want for m in models):
+    if not any(_same_model(m, want) for m in models):
         return f"⚠ Le modèle « {want} » n'est pas installé. Ouvre un terminal et tape :\nollama pull {want}"
     return None

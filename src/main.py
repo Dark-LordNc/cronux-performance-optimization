@@ -1,6 +1,7 @@
 """Cronux — fenêtre principale."""
 import datetime
 import os
+import queue
 import re
 import subprocess
 import sys
@@ -61,6 +62,20 @@ def _apply_theme():
 _apply_theme()
 
 
+_FONTS = {}
+
+
+def font(size=None, weight="normal", slant="roman"):
+    """Polices partagées : créer un CTkFont pour chaque carte/bulle coûtait cher (60 cartes × 3 polices)."""
+    key = (size, weight, slant)
+    if key not in _FONTS:
+        kw = {"weight": weight, "slant": slant}
+        if size:
+            kw["size"] = size
+        _FONTS[key] = ctk.CTkFont(**kw)
+    return _FONTS[key]
+
+
 def resource(name):
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, name)
@@ -114,8 +129,8 @@ class NotifPanel(ctk.CTkToplevel):
             card = ctk.CTkFrame(self.list, fg_color=CARD_COLOR, corner_radius=10)
             card.pack(fill="x", pady=4, padx=4)
             ctk.CTkLabel(card, text=f"{n['app']} · {_short_time(n['time'])}", text_color="gray",
-                         font=ctk.CTkFont(size=11), anchor="w").pack(fill="x", padx=10, pady=(6, 0))
-            ctk.CTkLabel(card, text=n["title"], font=ctk.CTkFont(weight="bold"), anchor="w",
+                         font=font(11), anchor="w").pack(fill="x", padx=10, pady=(6, 0))
+            ctk.CTkLabel(card, text=n["title"], font=font(weight="bold"), anchor="w",
                          justify="left", wraplength=330).pack(fill="x", padx=10)
             if n["body"]:
                 ctk.CTkLabel(card, text=n["body"], anchor="w", justify="left",
@@ -124,7 +139,7 @@ class NotifPanel(ctk.CTkToplevel):
             row.pack(fill="x", padx=10, pady=(2, 8))
             if n.get("reason"):
                 ctk.CTkLabel(row, text=n["reason"], text_color="gray",
-                             font=ctk.CTkFont(size=11, slant="italic")).pack(side="left")
+                             font=font(11, slant="italic")).pack(side="left")
             ctk.CTkButton(row, text="Pas important" if important else "★ Important", width=110, height=26,
                           fg_color="transparent", border_width=1, text_color=("black", "white"),
                           command=lambda n=n, imp=not important: self.reclass(n, imp)).pack(side="right")
@@ -255,19 +270,29 @@ class SettingsPanel(ctk.CTkToplevel):
             except Exception:
                 pass
         self.saved.configure(text="Enregistré ✓  (pris en compte immédiatement)")
-        self.after(2500, lambda: self.saved.configure(text=""))
+        self.after(2500, lambda: self._set_saved(""))
         # Si le modèle choisi n'est pas encore téléchargé, propose de le faire maintenant.
+        # La vérification interroge Ollama (jusqu'à 5 s) : faite en arrière-plan pour ne pas figer la fenêtre.
         model = changes.get("model")
-        if model and agent_mod.model_installed(model=model) is False:
-            if messagebox.askyesno("Modèle à télécharger",
-                                   f"Le modèle « {model} » n'est pas encore installé.\n"
-                                   "Le télécharger maintenant ? (plusieurs Go, une seule fois)", parent=self):
-                threading.Thread(target=self._pull, args=(model,), daemon=True).start()
+        if model:
+            self.app.run_bg(lambda: agent_mod.model_installed(model=model),
+                            lambda installed: self._offer_pull(model) if installed is False else None)
 
-    def _pull(self, model):
-        self.saved.configure(text_color="#2563EB")
-        ok, msg = agent_mod.pull_model(model, on_status=lambda s: self.saved.configure(text=s))
-        self.saved.configure(text=("✓ " if ok else "⚠ ") + msg, text_color="#15803d" if ok else "#b91c1c")
+    def _set_saved(self, text, color=None):
+        if self.winfo_exists():
+            self.saved.configure(text=text, **({"text_color": color} if color else {}))
+
+    def _offer_pull(self, model):
+        if not self.winfo_exists():
+            return
+        if messagebox.askyesno("Modèle à télécharger",
+                               f"Le modèle « {model} » n'est pas encore installé.\n"
+                               "Le télécharger maintenant ? (plusieurs Go, une seule fois)", parent=self):
+            self._set_saved("…", "#2563EB")
+            self.app.run_bg(
+                lambda: agent_mod.pull_model(model, on_status=lambda s: self.app.call_ui(self._set_saved, s)),
+                lambda res: self._set_saved(("✓ " if res[0] else "⚠ ") + res[1],
+                                            "#15803d" if res[0] else "#b91c1c"))
 
 
 class MemoryPanel(ctk.CTkToplevel):
@@ -358,6 +383,7 @@ class Overlay(ctk.CTkToplevel):
             w.bind("<Button-1>", self._start)
             w.bind("<B1-Motion>", self._drag)
         self._alive = True
+        self._busy = False
         self._tick()
 
     def _start(self, e):
@@ -369,20 +395,29 @@ class Overlay(ctk.CTkToplevel):
     def _tick(self):
         if not self._alive:
             return
-        threading.Thread(target=self._refresh, daemon=True).start()
+        if not self._busy:  # nvidia-smi lent : on n'empile pas les mesures
+            self._busy = True
+            self.app.run_bg(self._measure, self._show)
         self.after(3000, self._tick)
 
-    def _refresh(self):
+    @staticmethod
+    def _measure():
         text = datetime.datetime.now().strftime("%H:%M")
         try:
             gpus = hardware.gpu_status()
             if gpus and gpus[0].get("util") is not None:
                 g = gpus[0]
-                text += f"   GPU {g['util']:.0f}%  {g['temp']:.0f}°C"
+                text += f"   GPU {g['util']:.0f}%"
+                if g.get("temp") is not None:
+                    text += f"  {g['temp']:.0f}°C"
         except Exception:
             pass
-        if self._alive:
-            self.after(0, lambda: self.label.configure(text=text))
+        return text
+
+    def _show(self, text):
+        self._busy = False
+        if self._alive and self.winfo_exists():
+            self.label.configure(text=text)
 
     def close(self):
         self._alive = False
@@ -446,42 +481,43 @@ class GamingPanel(ctk.CTkToplevel):
         self.msg.pack(pady=6)
 
         self._alive = True
+        self._hw_busy = False
         self._hw_tick()
         self.after(150, self.focus_force)
 
-    def _gaming(self, state):
+    def _tool(self, name, args):
         self.msg.configure(text="…", text_color="gray")
-        threading.Thread(target=lambda: self._set_msg(tools.run("gaming_mode", {"state": state}, self.ctx)),
-                         daemon=True).start()
+        self.app.run_bg(lambda: tools.run(name, args, self.ctx), self._set_msg)
+
+    def _gaming(self, state):
+        self._tool("gaming_mode", {"state": state})
 
     def _shot(self):
-        threading.Thread(target=lambda: self._set_msg(tools.run("screenshot", {}, self.ctx)), daemon=True).start()
+        self._tool("screenshot", {})
 
     def _shot_discord(self):
         ch = self.chan.get().strip()
         if not ch:
             self.msg.configure(text="Indique un salon Discord.", text_color="#b91c1c")
             return
-        threading.Thread(target=lambda: self._set_msg(
-            tools.run("screenshot_to_discord", {"channel": ch}, self.ctx)), daemon=True).start()
+        self._tool("screenshot_to_discord", {"channel": ch})
 
     def _set_msg(self, text):
-        if self._alive:
-            self.after(0, lambda: self.msg.configure(text=text, text_color="gray"))
+        if self._alive and self.winfo_exists():
+            self.msg.configure(text=text, text_color="gray")
 
     def _hw_tick(self):
         if not self._alive:
             return
-        threading.Thread(target=self._hw_refresh, daemon=True).start()
+        if not self._hw_busy:  # une mesure à la fois (avant : un nouveau thread toutes les 2,5 s quoi qu'il arrive)
+            self._hw_busy = True
+            self.app.run_bg(lambda: tools.run("hardware_status", {}, self.ctx), self._hw_show)
         self.after(2500, self._hw_tick)
 
-    def _hw_refresh(self):
-        try:
-            text = tools.run("hardware_status", {}, self.ctx)
-        except Exception as e:
-            text = f"Erreur : {e}"
-        if self._alive:
-            self.after(0, lambda: self.hw.configure(text=text))
+    def _hw_show(self, text):
+        self._hw_busy = False
+        if self._alive and self.winfo_exists():
+            self.hw.configure(text=text)
 
     def destroy(self):
         self._alive = False
@@ -518,21 +554,24 @@ class MaintenancePanel(ctk.CTkToplevel):
         self.clean_btn = ctk.CTkButton(bar, text="Nettoyer la sélection", command=self._clean)
         self.clean_btn.pack(side="right")
 
-        threading.Thread(target=self._analyze, daemon=True).start()
+        self._analyze()
         self.after(150, self.focus_force)
 
-    def _analyze(self):
-        self.after(0, lambda: self.msg.configure(text="Analyse…"))
-        try:
-            data = maintenance.analyze()
-            games_list = maintenance.unused_games(self.ctx)
-        except Exception as e:
-            self.after(0, lambda: self.msg.configure(text=f"Erreur : {e}", text_color="#b91c1c"))
-            return
-        self.after(0, self._render, data, games_list)
+    def _analyze(self, done_msg=("", "gray")):
+        self.msg.configure(text="Analyse…", text_color="gray")
+        self.app.run_bg(lambda: (maintenance.analyze(), maintenance.unused_games(self.ctx)),
+                        lambda res: self._render(*res, done_msg=done_msg), self._error)
 
-    def _render(self, data, games_list):
-        self.msg.configure(text="")
+    def _error(self, e):
+        # Avant : NameError (« e » n'existe plus quand le lambda s'exécutait) au lieu du message d'erreur.
+        if self.winfo_exists():
+            self.msg.configure(text=f"Erreur : {e}", text_color="#b91c1c")
+            self.clean_btn.configure(state="normal", text="Nettoyer la sélection")
+
+    def _render(self, data, games_list, done_msg=("", "gray")):
+        if not self.winfo_exists():
+            return
+        self.msg.configure(text=done_msg[0], text_color=done_msg[1])
         lines = []
         for d in data["drives"]:
             pct = d["free"] * 100 // d["total"] if d["total"] else 0
@@ -581,14 +620,15 @@ class MaintenancePanel(ctk.CTkToplevel):
                                    "(sans risque : ils sont recréés automatiquement)", parent=self):
             return
         self.clean_btn.configure(state="disabled", text="Nettoyage…")
-        threading.Thread(target=self._do_clean, args=(keys,), daemon=True).start()
+        self.app.run_bg(lambda: maintenance.clean(keys), self._cleaned, self._error)
 
-    def _do_clean(self, keys):
-        freed, _ = maintenance.clean(keys)
-        self.after(0, lambda: self.msg.configure(text=f"✓ {maintenance._fmt(freed)} libérés",
-                                                 text_color="#15803d"))
-        self.after(0, lambda: self.clean_btn.configure(state="normal", text="Nettoyer la sélection"))
-        threading.Thread(target=self._analyze, daemon=True).start()
+    def _cleaned(self, res):
+        if not self.winfo_exists():
+            return
+        freed, _ = res
+        self.clean_btn.configure(state="normal", text="Nettoyer la sélection")
+        # Le message reste affiché après la nouvelle analyse (avant, il était effacé aussitôt).
+        self._analyze(done_msg=(f"✓ {maintenance._fmt(freed)} libérés", "#15803d"))
 
     def _uninstall(self, g):
         if not messagebox.askyesno("Désinstaller", f"Ouvrir la désinstallation de « {g['name']} » ?\n"
@@ -688,11 +728,20 @@ class DiscordPanel(ctk.CTkToplevel):
         self.after(2000, lambda: self.saved.configure(text=""))
 
     def _refresh_status(self):
-        acc = discord_auth.account()
+        # account() interroge Discord (jusqu'à 10 s) : en arrière-plan pour ne pas figer la fenêtre.
+        self.app.run_bg(discord_auth.account, self._show_account)
+
+    def _show_account(self, acc):
+        if not self.winfo_exists():
+            return
         if acc:
             self.status.configure(text=f"✓ Connecté en tant que {acc.get('username', '')}", text_color="#15803d")
         else:
             self.status.configure(text="Non connecté", text_color="gray")
+
+    def _set_status(self, text, color="gray"):
+        if self.winfo_exists():
+            self.status.configure(text=text, text_color=color)
 
     def _save(self):
         config.update({"discord_client_id": self.cid.get().strip(),
@@ -705,12 +754,16 @@ class DiscordPanel(ctk.CTkToplevel):
     def _connect(self):
         self._save()
         self.connect_btn.configure(state="disabled", text="Connexion en cours…")
-        threading.Thread(target=self._do_connect, daemon=True).start()
+        cid, secret = self.cid.get().strip(), self.csecret.get().strip()
+        self.app.run_bg(
+            lambda: discord_auth.connect(cid, secret, on_status=lambda s: self.app.call_ui(self._set_status, s)),
+            self._connected)
 
-    def _do_connect(self):
-        ok, msg = discord_auth.connect(self.cid.get().strip(), self.csecret.get().strip(),
-                                       on_status=lambda s: self.status.configure(text=s, text_color="gray"))
-        self.status.configure(text=("✓ " if ok else "⚠ ") + msg, text_color="#15803d" if ok else "#b91c1c")
+    def _connected(self, res):
+        if not self.winfo_exists():
+            return
+        ok, msg = res
+        self._set_status(("✓ " if ok else "⚠ ") + msg, "#15803d" if ok else "#b91c1c")
         self.connect_btn.configure(state="normal", text="🔗  Se connecter avec Discord")
         if ok:
             self._refresh_status()
@@ -756,12 +809,12 @@ class Toast(ctk.CTkToplevel):
         bar.pack(fill="x", padx=12, pady=(8, 0))
         icon = "📞" if is_call else ("💬" if "discord" in notif.get("app", "").lower() else "🔔")
         ctk.CTkLabel(bar, text=f"{icon}  {notif.get('app', '')}", anchor="w",
-                     text_color=accent, font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
+                     text_color=accent, font=font(12, "bold")).pack(side="left")
         ctk.CTkButton(bar, text="✕", width=22, height=22, fg_color="transparent",
                       text_color=("gray40", "gray70"), hover=False,
                       command=self.close).pack(side="right")
         ctk.CTkLabel(card, text=notif.get("title", ""), anchor="w", justify="left",
-                     font=ctk.CTkFont(size=13, weight="bold"),
+                     font=font(13, "bold"),
                      wraplength=self.WIDTH - 28).pack(fill="x", padx=12, pady=(2, 0))
         if notif.get("body"):
             ctk.CTkLabel(card, text=notif["body"][:220], anchor="w", justify="left",
@@ -856,6 +909,8 @@ class SpotifyPanel(ctk.CTkToplevel):
         ctk.CTkButton(search, text="▶", width=40, command=self._play_query).pack(side="left", padx=(6, 0))
 
         self._alive = True
+        self._polling = False
+        self._vol_job = None
         self.protocol("WM_DELETE_WINDOW", self._close)
         self._tick()
         self.after(150, self.focus_force)
@@ -863,12 +918,14 @@ class SpotifyPanel(ctk.CTkToplevel):
     def _run(self, fn, *a, then=None):
         def work():
             try:
-                res = fn(self.ctx, *a)
+                return fn(self.ctx, *a)
             except Exception as e:
-                res = f"Erreur : {e}"
-            if then and self._alive:
-                self.after(0, then, res)
-        threading.Thread(target=work, daemon=True).start()
+                return f"Erreur : {e}"
+
+        def done(res):
+            if then and self._alive and self.winfo_exists():
+                then(res)
+        self.app.run_bg(work, done)
 
     def _do(self, action):
         self._run(tools.spotify_control, action, then=lambda r: self._refresh_soon())
@@ -881,7 +938,15 @@ class SpotifyPanel(ctk.CTkToplevel):
         self._run(tools.spotify_now_playing, then=after)
 
     def _volume(self, value):
-        self._run(tools.spotify_control, "volume", int(value))
+        # Le curseur appelle cette fonction à CHAQUE pixel de déplacement : avant, des dizaines de requêtes
+        # Spotify partaient d'un coup (et Spotify finissait par refuser). On n'envoie que la valeur finale.
+        if self._vol_job is not None:
+            self.after_cancel(self._vol_job)
+        self._vol_job = self.after(250, self._send_volume, int(value))
+
+    def _send_volume(self, value):
+        self._vol_job = None
+        self._run(tools.spotify_control, "volume", value)
 
     def _play_query(self):
         q = self.q.get().strip()
@@ -894,9 +959,13 @@ class SpotifyPanel(ctk.CTkToplevel):
         self.after(600, self._update)
 
     def _update(self):
+        if self._polling:  # réponse précédente pas encore arrivée : on n'empile pas les requêtes
+            return
+        self._polling = True
         self._run(tools.spotify_now_playing, then=self._show)
 
     def _show(self, info):
+        self._polling = False
         if info.startswith("Erreur") or "configuré" in info:
             self.now.configure(text="Spotify non connecté")
             self.sub.configure(text="Ajoute ton Client ID dans ⚙ → Spotify")
@@ -917,12 +986,28 @@ class SpotifyPanel(ctk.CTkToplevel):
 
     def _close(self):
         self._alive = False
+        if self._vol_job is not None:
+            self.after_cancel(self._vol_job)
         self.destroy()
 
 
+MAX_BUBBLES = 150   # au-delà, les plus anciennes bulles sont retirées (la fenêtre restait de plus en plus lente)
+MAX_TOASTS = 5
+
+
 class App(ctk.CTk):
+    UI_POLL_MS = 30
+
     def __init__(self):
         super().__init__()
+        _FONTS.clear()  # les polices appartiennent à la fenêtre Tk qui les a créées
+        # File des actions à exécuter sur le thread de l'interface. Tkinter n'est PAS thread-safe :
+        # les threads d'arrière-plan déposent ici leurs mises à jour au lieu de toucher aux widgets.
+        self._ui_queue = queue.SimpleQueue()
+        self._main_thread = threading.get_ident()
+        self._resize_job = None
+        self._last_wrap = None
+        self._drain_ui()
         self.title("Cronux")
         self.geometry("460x680")
         self.minsize(380, 480)
@@ -977,6 +1062,7 @@ class App(ctk.CTk):
         self.send_btn.pack(side="left", padx=(6, 0))
         self.entry.focus()
         self.bind("<Configure>", self._on_resize)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         previous = memory.last_conversation()
         if previous:
@@ -995,6 +1081,49 @@ class App(ctk.CTk):
         threading.Thread(target=self._startup_check, daemon=True).start()
         threading.Thread(target=self._watch_notifications, daemon=True).start()
 
+    # ── Threads ↔ interface
+    def call_ui(self, fn, *args):
+        """Exécute fn(*args) sur le thread de l'interface (utilisable depuis n'importe quel thread)."""
+        if threading.get_ident() == self._main_thread:
+            fn(*args)
+        else:
+            self._ui_queue.put((fn, args))
+
+    def _drain_ui(self):
+        try:
+            while True:
+                fn, args = self._ui_queue.get_nowait()
+                try:
+                    fn(*args)
+                except Exception as e:  # une fenêtre fermée entre-temps ne doit pas tout arrêter
+                    print(f"Cronux : erreur d'affichage ignorée : {e!r}", file=sys.stderr)
+        except queue.Empty:
+            pass
+        try:
+            self.after(self.UI_POLL_MS, self._drain_ui)
+        except Exception:
+            pass  # fenêtre détruite
+
+    def run_bg(self, work, on_done=None, on_error=None):
+        """Lance work() dans un thread, puis on_done(résultat) (ou on_error(exception)) sur l'interface."""
+        def runner():
+            try:
+                res = work()
+            except Exception as e:
+                if on_error is not None:
+                    self.call_ui(on_error, e)
+                else:
+                    print(f"Cronux : tâche d'arrière-plan en erreur : {e!r}", file=sys.stderr)
+                return
+            if on_done is not None:
+                self.call_ui(on_done, res)
+        threading.Thread(target=runner, daemon=True).start()
+
+    def _on_close(self):
+        for t in list(self.toasts):
+            t.close()
+        self.destroy()
+
     # ── Affichage
     def _wrap(self):
         return max(200, self.chat.winfo_width() - 90)
@@ -1012,6 +1141,9 @@ class App(ctk.CTk):
         if who == "notif":
             lbl.bind("<Button-1>", lambda e: self.open_notifs())
         self.labels.append(lbl)
+        while len(self.labels) > MAX_BUBBLES:
+            old = self.labels.pop(0)
+            old.master.destroy()  # la ligne (row) qui contient la bulle
         self.after(50, lambda: self.chat._parent_canvas.yview_moveto(1.0))
 
     def _copy(self, text):
@@ -1020,8 +1152,22 @@ class App(ctk.CTk):
         self.set_status("Copié ✓")
         self.after(1500, lambda: self.set_status(""))
 
-    def _on_resize(self, _):
+    def _on_resize(self, event):
+        # <Configure> est reçu pour CHAQUE widget enfant (dizaines d'événements par seconde pendant
+        # un redimensionnement), et chaque fois toutes les bulles étaient reconfigurées.
+        # Désormais : seulement la fenêtre principale, et une fois le redimensionnement terminé.
+        if event.widget is not self:
+            return
+        if self._resize_job is not None:
+            self.after_cancel(self._resize_job)
+        self._resize_job = self.after(120, self._apply_wrap)
+
+    def _apply_wrap(self):
+        self._resize_job = None
         w = self._wrap()
+        if w == self._last_wrap:
+            return
+        self._last_wrap = w
         for lbl in self.labels:
             lbl.configure(wraplength=w)
 
@@ -1046,10 +1192,10 @@ class App(ctk.CTk):
 
     def _worker(self, text):
         try:
-            reply = self.agent.ask(text, on_status=lambda s: self.after(0, self.set_status, s))
+            reply = self.agent.ask(text, on_status=lambda s: self.call_ui(self.set_status, s))
         except Exception as e:
             reply = f"Oups : {e}"
-        self.after(0, self._done, reply)
+        self.call_ui(self._done, reply)
 
     def _done(self, reply):
         self.add_bubble(reply, "bot")
@@ -1059,13 +1205,18 @@ class App(ctk.CTk):
         self.entry.focus()
 
     def confirm(self, title, message):
-        """Appelé depuis un thread : affiche une fenêtre Oui/Non et attend la réponse."""
-        done, result = threading.Event(), {}
+        """Affiche une fenêtre Oui/Non et attend la réponse (depuis un thread ou depuis l'interface)."""
+        if threading.get_ident() == self._main_thread:
+            # Depuis l'interface, attendre un Event bloquerait la boucle Tk pour toujours.
+            return messagebox.askyesno(title, message, parent=self)
+        done, result = threading.Event(), {"ok": False}
 
         def ask():
-            result["ok"] = messagebox.askyesno(title, message, parent=self)
-            done.set()
-        self.after(0, ask)
+            try:
+                result["ok"] = messagebox.askyesno(title, message, parent=self)
+            finally:
+                done.set()
+        self.call_ui(ask)
         done.wait()
         return result["ok"]
 
@@ -1084,9 +1235,9 @@ class App(ctk.CTk):
                             classify_notifications(new, time_budget=max(3, min(7, 13 - interval)))
                             notifications.add(new, seen=first)
                             if not first:
-                                self.after(0, self._on_new_notifs, new)
+                                self.call_ui(self._on_new_notifs, new)
                             else:
-                                self.after(0, self.update_badge)
+                                self.call_ui(self.update_badge)
                 except Exception:
                     pass
             time.sleep(interval)
@@ -1103,7 +1254,7 @@ class App(ctk.CTk):
                 if "discord" in n.get("app", "").lower() or n.get("important"):
                     self._show_toast(n)
         for n in [x for x in new if x.get("important")][-3:]:
-            body = f"\n{n['body'][:160]}" if n["body"] else ""
+            body = f"\n{n['body'][:160]}" if n.get("body") else ""
             self.add_bubble(f"🔔 {n['app']} · {n['title']}{body}", "notif")
         self.update_badge()
         if self.panel is not None and self.panel.winfo_exists():
@@ -1118,6 +1269,10 @@ class App(ctk.CTk):
 
     def register_toast(self, toast):
         self.toasts.append(toast)
+        # Au-delà de 5 bulles, les plus anciennes se ferment (avant, elles restaient affichées
+        # sans position, en haut à gauche de l'écran).
+        for old in self.toasts[:-MAX_TOASTS]:
+            old.close()
         self._restack_toasts()
 
     def unregister_toast(self, toast):
@@ -1127,7 +1282,7 @@ class App(ctk.CTk):
 
     def _restack_toasts(self):
         y = 0
-        for t in reversed(self.toasts[-5:]):  # au plus 5 bulles à l'écran
+        for t in reversed(self.toasts[-MAX_TOASTS:]):  # au plus 5 bulles à l'écran
             if t.winfo_exists():
                 y += t.place_at(y) + Toast.GAP
 
@@ -1199,8 +1354,12 @@ class App(ctk.CTk):
                 messagebox.showwarning("Mise à jour", "Ce fichier ne ressemble pas à un Cronux.pyw valide.",
                                        parent=self)
                 return
-            with open(self_path, "wb") as f:   # un .pyw n'est pas verrouillé : on peut l'écraser
+            # Écriture dans un fichier temporaire puis remplacement atomique : une coupure pendant
+            # la copie ne laisse plus un Cronux.pyw à moitié écrit (et donc inutilisable).
+            tmp = self_path + ".new"
+            with open(tmp, "wb") as f:   # un .pyw n'est pas verrouillé : on peut le remplacer
                 f.write(data)
+            os.replace(tmp, self_path)
         except Exception as e:
             messagebox.showerror("Mise à jour", f"Impossible de remplacer le fichier : {e}", parent=self)
             return
@@ -1239,7 +1398,7 @@ class App(ctk.CTk):
     def _startup_check(self):
         problem = check_ollama()
         if problem:
-            self.after(0, self.add_bubble, problem, "bot")
+            self.call_ui(self.add_bubble, problem, "bot")
 
 
 if __name__ == "__main__":
