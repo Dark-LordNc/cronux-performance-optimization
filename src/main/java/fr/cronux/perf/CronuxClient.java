@@ -16,6 +16,36 @@ public final class CronuxClient implements ClientModInitializer {
     private static final boolean AUDIT = Boolean.getBoolean("cronux.audit");
     private static int auditTicks, worldTicks;
 
+    /** Test uniquement : ouvre "Créer un monde" puis valide, par réflexion (API interne). */
+    private static void createTestWorld(net.minecraft.client.Minecraft mc) {
+        try {
+            Class<?> cws = Class.forName("net.minecraft.client.gui.screens.worldselection.CreateWorldScreen");
+            Object screen = mc.gui.screen();
+            if (!cws.isInstance(screen)) {
+                for (java.lang.reflect.Method m : cws.getMethods()) {
+                    if (!m.getName().equals("openFresh") || !java.lang.reflect.Modifier.isStatic(m.getModifiers())) continue;
+                    Object[] args = new Object[m.getParameterCount()];
+                    Class<?>[] types = m.getParameterTypes();
+                    for (int i = 0; i < args.length; i++) {
+                        if (types[i] == net.minecraft.client.Minecraft.class) args[i] = mc;
+                        else if (types[i] == Runnable.class) args[i] = (Runnable) () -> {};
+                        else if (net.minecraft.client.gui.screens.Screen.class.isAssignableFrom(types[i])) args[i] = screen;
+                    }
+                    LOG.info("CRONUX-TEST openFresh{}", java.util.Arrays.toString(types));
+                    m.invoke(null, args);
+                    return;
+                }
+            } else {
+                java.lang.reflect.Method create = cws.getDeclaredMethod("onCreate");
+                create.setAccessible(true);
+                create.invoke(screen);
+                LOG.info("CRONUX-TEST onCreate called");
+            }
+        } catch (Throwable t) {
+            LOG.error("CRONUX-TEST world creation failed (screen={})", mc.gui.screen(), t);
+        }
+    }
+
     private static void auditTick(net.minecraft.client.Minecraft mc) {
         if (auditTicks++ == 0) {
             try {
@@ -38,6 +68,8 @@ public final class CronuxClient implements ClientModInitializer {
                 LOG.info("CRONUX-WORLD-OK");
                 mc.stop();
             }
+        } else if (auditTicks == 200 || auditTicks == 260) {
+            createTestWorld(mc);
         } else if (auditTicks > 6000) {
             LOG.error("CRONUX-WORLD-TIMEOUT");
             mc.stop();
