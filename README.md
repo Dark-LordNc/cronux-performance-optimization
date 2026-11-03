@@ -1,38 +1,32 @@
-# Cronux Performance
+# Cronux Performance 2.0
 
-A client-side Fabric mod for **Minecraft 26.x (26.1 → 26.3)**, built to squeeze out as many FPS as possible.
+A client-side Fabric mod for **Minecraft 26.3**, built to push FPS as high as possible.
 
-## What it does
-- **FPS preset applied on first launch:** VSync off, unlimited FPS, Fast graphics, clouds and particles off/minimal, no entity shadows, smooth lighting off, biome blend 0, mipmaps 0, render distance 8, simulation distance 5. The preset is applied **once**; you can change your settings afterwards.
-- **Skips the vignette**, a full-screen blended quad drawn every frame.
-- Configuration lives in `config/cronux.properties`. Set `applyPreset=true` to reapply the preset.
+**Download:** [`release/cronux-performance-2.0.0+mc26.3.jar`](release/cronux-performance-2.0.0+mc26.3.jar)
 
-## Getting the most FPS (the mod alone isn't enough)
-Install these alongside it (Fabric, same game version). They do the heavy lifting:
+## Installation
+1. Fabric Loader **0.20.1+** for 26.3, plus **Fabric API** (0.165.0+26.3 or newer)
+2. Drop the `.jar` into `.minecraft/mods/`
+3. Java 25 (the official launcher provides it)
 
-| Mod | Effect |
+## Settings
+**O key** in game, or **Options → Video → "Cronux Performance (FPS)..."**
+
+| Setting | Effect |
 |---|---|
-| **Sodium** | Rewrites the rendering engine (×2 to ×5 FPS) |
-| **Lithium** | Optimizes game logic / ticks |
-| **FerriteCore** | Cuts RAM usage |
-| **ImmediatelyFast** | Speeds up HUD, text and entity rendering |
-| **EntityCulling** | Skips rendering entities you can't see |
+| Preset **Équilibré** | Render distance 8, fast graphics, everything that costs a lot without being visible is turned off |
+| Preset **FPS Max** *(applied on first launch)* | Distance 5, entities at 75%, no weather, entities beyond 48 blocks hidden |
+| Preset **EXTRÊME** | Distance 2, no particles, entities beyond 32 blocks hidden. The highest numbers |
+| Unlock FPS | Removes vanilla's 60 FPS cap in menus and the 10–30 FPS AFK limit |
+| FPS counter | Top left, colored (cyan ≥ 1000) |
+| Hide sky / weather / particles / hand | Skips those rendering passes. Particles aren't even simulated anymore |
+| Entity / chest-and-sign distance | Doesn't draw entities / block entities beyond N blocks |
 
-Recommended JVM arguments (launcher → Java arguments):
-```
--Xms4G -Xmx4G -XX:+UseZGC -XX:+ZGenerational -XX:+AlwaysPreTouch -XX:+DisableExplicitGC
-```
+The presets also set: VSync off, unlimited FPS, clouds off, no entity shadows, no smooth lighting, biome blend 0, mipmaps 0, no vignette, no chunk fade-in, no view bobbing.
 
-### About "8000 FPS"
-Minecraft has no hard limit above "Unlimited". The real ceiling is your CPU/GPU and the scene. With Sodium plus this preset, a powerful PC can reach several thousand FPS looking at the sky or in a small world. In normal play, expect a few hundred to ~1500 FPS on high-end hardware. Your screen only displays its refresh rate (144/240 Hz…) anyway.
+## Being honest about "8000 FPS"
+The mod removes every limit and every non-essential rendering pass. The final number depends **only on your graphics card and CPU**. With the EXTRÊME preset, the sky hidden, on a powerful PC, you can reach several thousand FPS. On an average PC it will be much less. RAM doesn't make FPS. For even more, add **Sodium** (when available for 26.3).
 
-## Download
-Ready-made jar: [`release/cronux-performance-1.1.0.jar`](release/cronux-performance-1.1.0.jar) → put it in `.minecraft/mods/` with Fabric Loader for 26.3.
-
-Since 26.1 Minecraft is no longer obfuscated: the mod targets the official class names through Mixin + reflection, with no compile-time dependency on the game, and silently skips any option that doesn't exist in your version.
-
-## Build
-```bash
-./gradlew build
-```
-The jar ends up in `build/libs/`. GitHub Actions also builds it on every push (**Actions** tab → *cronux-performance* artifact).
+## Development
+- `./gradlew build`: compiles against the real 26.3 client (Loom 1.19, no obfuscation since 26.1)
+- CI (`.github/workflows/build.yml`) builds the jar, then **launches Minecraft 26.3** under Xvfb: it checks that every mixin applies, creates a world and plays 20 s with every option enabled
