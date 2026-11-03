@@ -1,28 +1,38 @@
 name: probe
-on: [push, workflow_dispatch]
+on:
+  push:
+    paths: ['.github/workflows/probe.yml']
+permissions:
+  contents: write
 jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 25 }
-      - name: versions
+      - name: dump
         run: |
+          mkdir out
+          {
           echo "== loom"; curl -s https://maven.fabricmc.net/net/fabricmc/fabric-loom/maven-metadata.xml | grep -o '<version>[^<]*</version>' | tail -8
-          echo "== loom plugin ids"; curl -s https://maven.fabricmc.net/net/fabricmc/ | grep -o 'href="[^"]*loom[^"]*"'
+          echo "== loom ids"; curl -s https://maven.fabricmc.net/net/fabricmc/ | grep -io 'href="[^"]*loom[^"]*"'
           echo "== games"; curl -s https://meta.fabricmc.net/v2/versions/game | jq -r '.[0:12][] | "\(.version) \(.stable)"'
           echo "== loader"; curl -s https://meta.fabricmc.net/v2/versions/loader | jq -r '.[0:3][] | .version'
-          echo "== fabric-api"; curl -s https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/maven-metadata.xml | grep -o '<version>[^<]*26\.[^<]*</version>' | tail -6
+          echo "== fabric-api"; curl -s https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/maven-metadata.xml | grep -o '<version>[^<]*</version>' | tail -6
+          echo "== intermediary 26.3"; curl -s -o /dev/null -w '%{http_code}\n' https://maven.fabricmc.net/net/fabricmc/intermediary/26.3/intermediary-26.3.pom
           echo "== modmenu"; curl -s https://maven.terraformersmc.com/releases/com/terraformersmc/modmenu/maven-metadata.xml | grep -o '<version>[^<]*</version>' | tail -4
-      - name: javap
+          echo "== template"; curl -s https://raw.githubusercontent.com/FabricMC/fabric-example-mod/HEAD/build.gradle; curl -s https://raw.githubusercontent.com/FabricMC/fabric-example-mod/HEAD/gradle.properties; curl -s https://raw.githubusercontent.com/FabricMC/fabric-example-mod/HEAD/gradle/wrapper/gradle-wrapper.properties
+          } > out/versions.txt 2>&1
+          U=$(curl -s https://piston-meta.mojang.com/mc/game/version_manifest_v2.json | jq -r '.versions[]|select(.id=="26.3")|.url')
+          curl -s "$U" -o v.json; jq '{javaVersion, mainClass}' v.json >> out/versions.txt
+          curl -s $(jq -r .downloads.client.url v.json) -o client.jar
+          mkdir c && (cd c && unzip -q ../client.jar 'net/minecraft/client/*' 'com/mojang/*')
+          (cd c && find . -name '*.class' | grep -v '\$[0-9]*\.class$' | sed 's|^\./||;s|\.class$||;s|/|.|g' | sort) > out/classes.txt
+          grep -E '^net\.minecraft\.client\.(Minecraft|Options|OptionInstance.*|gui\.Hud.*|gui\.Gui[A-Za-z]*|gui\.screens\.Screen|gui\.screens\.options\..*|gui\.components\.(Button.*|CycleButton.*|AbstractSliderButton|StringWidget|AbstractWidget)|gui\.layouts\..*|renderer\.[A-Za-z$]*|renderer\.fog\..*|renderer\.entity\.EntityRenderDispatcher|renderer\.entity\.EntityRenderer|renderer\.blockentity\.BlockEntityRenderDispatcher|renderer\.state\.level\..*|particle\.ParticleEngine|particle\.ParticleRenderer.*|KeyMapping.*|Camera|FramerateLimitTracker|InactivityFpsLimiter|GraphicsPreset.*|CloudStatus|ParticleStatus|GraphicsStatus|PrioritizeChunkUpdates|DeltaTracker.*)$|^com\.mojang\.blaze3d\.platform\.(Window|FramerateLimitTracker)$|^com\.mojang\.renderpearl.*Window.*' out/classes.txt > sel.txt || true
+          javap -p -cp c $(cat sel.txt) > out/api.txt 2>&1 || true
+          grep -c . out/api.txt
+      - name: push
         run: |
-          V=26.3
-          U=$(curl -s https://piston-meta.mojang.com/mc/game/version_manifest_v2.json | jq -r --arg v $V '.versions[]|select(.id==$v)|.url')
-          echo "manifest url: $U"
-          curl -s "$U" -o v.json; curl -s $(jq -r .downloads.client.url v.json) -o client.jar; ls -la client.jar
-          mkdir c && cd c && unzip -q ../client.jar 'net/minecraft/*' && cd ..
-          for cls in net.minecraft.client.Minecraft net.minecraft.client.Options net.minecraft.client.OptionInstance net.minecraft.client.gui.Gui net.minecraft.client.renderer.GameRenderer net.minecraft.client.renderer.LevelRenderer net.minecraft.client.renderer.entity.EntityRenderDispatcher net.minecraft.client.renderer.entity.EntityRenderer net.minecraft.client.particle.ParticleEngine net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher net.minecraft.client.renderer.fog.FogRenderer net.minecraft.client.renderer.SkyRenderer net.minecraft.client.renderer.WeatherEffectRenderer net.minecraft.client.gui.screens.Screen net.minecraft.client.gui.screens.options.VideoSettingsScreen net.minecraft.client.gui.components.Button net.minecraft.client.gui.components.CycleButton net.minecraft.client.KeyMapping com.mojang.blaze3d.platform.Window; do
-            echo "######## $cls"; javap -p -cp c $cls 2>&1 | grep -v 'lambda\$' | head -150
-          done
-          echo "######## files"; ls c/net/minecraft/client/renderer | head -100; ls c/net/minecraft/client/renderer/fog 2>/dev/null
-          grep -l "renderVignette\|Vignette" -r c/net/minecraft/client/gui | head
+          cd out && git init -q && git checkout -q -b probe-data && git add -A
+          git -c user.name=ci -c user.email=ci@local commit -qm data
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" probe-data
