@@ -27,3 +27,26 @@ jobs:
           git init -q && git checkout -q -b release-jar && git add -A
           git -c user.name=ci -c user.email=ci@local commit -qm "jar for ${GITHUB_SHA}"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" release-jar
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb mesa-vulkan-drivers libgl1-mesa-dri libvulkan1 > /dev/null
+      - name: launch Minecraft 26.3 with the mod
+        run: |
+          timeout 600 xvfb-run -a -s "-screen 0 1280x720x24" ./gradlew runClient --no-daemon > run.txt 2>&1 || true
+          grep -E "CRONUX|Cronux|cronux|Mixin|mixin|ERROR|Exception|Caused by|Injection|FATAL" run.txt | grep -v "^\s*at " | head -150
+          grep -q CRONUX-AUDIT-OK run.txt
+      - name: publish log
+        if: always()
+        run: |
+          mkdir lo && cp run.txt lo/ && cp run/logs/latest.log lo/ 2>/dev/null; cd lo
+          git init -q && git checkout -q -b smoke-log && git add -A
+          git -c user.name=ci -c user.email=ci@local commit -qm log
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" smoke-log

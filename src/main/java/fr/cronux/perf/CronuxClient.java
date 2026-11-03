@@ -12,6 +12,20 @@ public final class CronuxClient implements ClientModInitializer {
     public static final Logger LOG = LoggerFactory.getLogger("Cronux");
 
     private static KeyMapping openConfig;
+    /** -Dcronux.audit=true : force l'application de tous les mixins (test automatique). */
+    private static final boolean AUDIT = Boolean.getBoolean("cronux.audit");
+    private static boolean audited;
+
+    private static void audit(net.minecraft.client.Minecraft mc) {
+        try {
+            org.spongepowered.asm.mixin.MixinEnvironment.getCurrentEnvironment().audit();
+            mc.gui.setScreen(new CronuxScreen(mc.gui.screen()));
+            LOG.info("CRONUX-AUDIT-OK");
+        } catch (Throwable t) {
+            LOG.error("CRONUX-AUDIT-FAIL", t);
+        }
+        mc.stop();
+    }
 
     @Override
     public void onInitializeClient() {
@@ -20,6 +34,10 @@ public final class CronuxClient implements ClientModInitializer {
                 new KeyMapping("key.cronux.config", InputConstants.KEY_O, KeyMapping.Category.MISC));
 
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
+            if (AUDIT && !audited) {
+                audited = true;
+                audit(mc);
+            }
             if (!CronuxConfig.firstLaunchDone) {
                 CronuxConfig.firstLaunchDone = true;
                 FpsPreset.FPS_MAX.apply(mc);
