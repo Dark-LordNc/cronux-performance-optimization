@@ -31,6 +31,14 @@ jobs:
           grep -E '^net\.minecraft\.client\.(Minecraft|Options|OptionInstance.*|gui\.Hud.*|gui\.Gui[A-Za-z]*|gui\.screens\.Screen|gui\.screens\.options\..*|gui\.components\.(Button.*|CycleButton.*|AbstractSliderButton|StringWidget|AbstractWidget)|gui\.layouts\..*|renderer\.[A-Za-z$]*|renderer\.fog\..*|renderer\.entity\.EntityRenderDispatcher|renderer\.entity\.EntityRenderer|renderer\.blockentity\.BlockEntityRenderDispatcher|renderer\.state\.level\..*|particle\.ParticleEngine|particle\.ParticleRenderer.*|KeyMapping.*|Camera|FramerateLimitTracker|InactivityFpsLimiter|GraphicsPreset.*|CloudStatus|ParticleStatus|GraphicsStatus|PrioritizeChunkUpdates|DeltaTracker.*)$|^com\.mojang\.blaze3d\.platform\.(Window|FramerateLimitTracker)$|^com\.mojang\.renderpearl.*Window.*' out/classes.txt > sel.txt || true
           javap -p -cp c $(cat sel.txt) > out/api.txt 2>&1 || true
           grep -c . out/api.txt
+          javap -p -cp c com.mojang.blaze3d.platform.InputConstants 'com.mojang.blaze3d.platform.InputConstants$Key' net.minecraft.client.gui.components.OptionsList 'net.minecraft.client.gui.components.CycleButton$OnValueChange' 'net.minecraft.client.gui.components.Button$OnPress' 'net.minecraft.client.gui.layouts.GridLayout' 'net.minecraft.client.gui.layouts.GridLayout$RowHelper' 'com.mojang.blaze3d.platform.FramerateLimitTracker$FramerateThrottleReason' net.minecraft.client.InactivityFpsLimit net.minecraft.server.level.ParticleStatus > out/api2.txt 2>&1 || true
+          javap -c -p -cp c com.mojang.blaze3d.platform.FramerateLimitTracker > out/fltracker.txt 2>&1 || true
+          javap -c -p -cp c net.minecraft.client.Minecraft | grep -n -A3 'getFramerateLimit\|limitDisplayFPS\|UNLIMITED\|framerateLimit' > out/mcframe.txt 2>&1 || true
+          curl -s -o fapi.jar https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/0.165.0+26.3/fabric-api-0.165.0+26.3.jar
+          mkdir fa && (cd fa && unzip -q ../fapi.jar 'META-INF/jars/*') ; ls fa/META-INF/jars > out/fapi-modules.txt
+          for j in fa/META-INF/jars/*key*.jar fa/META-INF/jars/*rendering-v1*.jar fa/META-INF/jars/*screen-api*.jar; do echo "## $j"; unzip -l $j | grep -o 'net/fabricmc/fabric/api/[^ ]*\.class'; done > out/fapi-classes.txt
+          for j in fa/META-INF/jars/*key*.jar; do mkdir -p k && (cd k && unzip -oq ../$j); done
+          javap -cp k $(cd k && find net/fabricmc/fabric/api -name '*.class' | sed 's/\.class//;s|/|.|g') >> out/fapi-key.txt 2>&1 || true
       - name: push
         run: |
           cd out && git init -q && git checkout -q -b probe-data && git add -A
