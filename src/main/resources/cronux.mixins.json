@@ -2,10 +2,17 @@
   "required": true,
   "minVersion": "0.8",
   "package": "fr.cronux.perf.mixin",
-  "compatibilityLevel": "JAVA_17",
+  "compatibilityLevel": "JAVA_21",
   "client": [
-    "MinecraftMixin",
-    "GuiMixin"
+    "BlockEntityRenderDispatcherMixin",
+    "EntityRenderDispatcherMixin",
+    "FramerateLimitTrackerMixin",
+    "GameRendererMixin",
+    "HudMixin",
+    "ParticleEngineMixin",
+    "SkyRendererMixin",
+    "VideoSettingsScreenMixin",
+    "WeatherEffectRendererMixin"
   ],
-  "injectors": { "defaultRequire": 0 }
+  "injectors": { "defaultRequire": 1 }
 }

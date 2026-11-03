@@ -1,15 +1,25 @@
-plugins { id 'java' }
-
-version = '1.1.0'
-base { archivesName = 'cronux-performance' }
-
-repositories { mavenCentral() }
-
-// Aucune dépendance Minecraft : le mod cible les noms officiels (26.x non obfusqué) par réflexion.
-dependencies {
-    compileOnly('net.fabricmc:sponge-mixin:0.17.5+mixin.0.8.7') { transitive = false }
-    compileOnly 'org.slf4j:slf4j-api:2.0.16'
+plugins {
+    id 'net.fabricmc.fabric-loom' version "${loom_version}"
 }
 
-java { toolchain.languageVersion = JavaLanguageVersion.of(21) }
-tasks.withType(JavaCompile).configureEach { options.release = 17; options.encoding = 'UTF-8' }
+version = "${project.mod_version}+mc${project.minecraft_version}"
+group = project.maven_group
+base { archivesName = project.archives_base_name }
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+}
+
+processResources {
+    def v = project.mod_version
+    inputs.property 'version', v
+    filesMatching('fabric.mod.json') { expand 'version': v }
+}
+
+tasks.withType(JavaCompile).configureEach { it.options.release = 25; it.options.encoding = 'UTF-8' }
+java {
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+}

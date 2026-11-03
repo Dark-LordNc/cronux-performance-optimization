@@ -1,22 +1,19 @@
 {
   "schemaVersion": 1,
   "id": "cronux",
-  "version": "1.1.0",
+  "version": "${version}",
   "name": "Cronux Performance",
-  "description": "Preset FPS agressif + micro-optimisations du rendu. A combiner avec Sodium, Lithium, FerriteCore, ImmediatelyFast et EntityCulling.",
+  "description": "Presets FPS (Equilibre / FPS Max / Extreme), FPS debloques dans les menus, compteur FPS, coupe ciel/meteo/particules/main et limite la distance des entites. Touche O ou Options > Video.",
   "authors": ["Dark-LordNc"],
   "license": "MIT",
   "environment": "client",
+  "entrypoints": { "client": ["fr.cronux.perf.CronuxClient"] },
   "mixins": ["cronux.mixins.json"],
   "depends": {
-    "fabricloader": ">=0.16.0",
-    "minecraft": ">=26.1"
+    "fabricloader": ">=0.20.0",
+    "fabric-api": "*",
+    "minecraft": "~26.3",
+    "java": ">=25"
   },
-  "suggests": {
-    "sodium": "*",
-    "lithium": "*",
-    "ferritecore": "*",
-    "immediatelyfast": "*",
-    "entityculling": "*"
-  }
+  "suggests": { "sodium": "*", "lithium": "*", "ferritecore": "*", "immediatelyfast": "*", "entityculling": "*" }
 }

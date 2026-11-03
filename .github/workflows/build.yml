@@ -1,5 +1,10 @@
 name: build
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    paths-ignore: ['.github/workflows/probe.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -8,10 +13,17 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: 25
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew build --no-daemon
+      - run: ./gradlew build --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: cronux-performance
           path: build/libs/*.jar
+      - name: publish jar to the release-jar branch
+        if: github.ref_name == 'claude/pensive-knuth-yaghsh'
+        run: |
+          mkdir out && cp build/libs/*.jar out/ && rm -f out/*-sources.jar && cd out
+          git init -q && git checkout -q -b release-jar && git add -A
+          git -c user.name=ci -c user.email=ci@local commit -qm "jar for ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" release-jar
