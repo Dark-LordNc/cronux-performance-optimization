@@ -46,7 +46,6 @@ public enum FpsPreset {
         set(o.ambientOcclusion(), false);
         set(o.biomeBlendRadius(), 0);
         set(o.mipmapLevels(), 0);
-        set(o.maxAnisotropyBit(), 0);
         set(o.vignette(), false);
         set(o.improvedTransparency(), false);
         set(o.cutoutLeaves(), false);

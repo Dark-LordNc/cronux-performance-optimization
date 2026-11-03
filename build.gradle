@@ -29,6 +29,7 @@ loom {
         client {
             vmArg '-Dcronux.audit=true'
             vmArg '-Dmixin.debug.countInjections=true'
+            programArgs '--quickPlaySingleplayer', 'cronuxtest'
         }
     }
 }

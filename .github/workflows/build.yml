@@ -40,9 +40,9 @@ jobs:
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb mesa-vulkan-drivers libgl1-mesa-dri libvulkan1 > /dev/null
       - name: launch Minecraft 26.3 with the mod
         run: |
-          timeout 600 xvfb-run -a -s "-screen 0 1280x720x24" ./gradlew runClient --no-daemon > run.txt 2>&1 || true
+          timeout 900 xvfb-run -a -s "-screen 0 1280x720x24" ./gradlew runClient --no-daemon > run.txt 2>&1 || true
           grep -E "CRONUX|Cronux|cronux|Mixin|mixin|ERROR|Exception|Caused by|Injection|FATAL" run.txt | grep -v "^\s*at " | head -150
-          grep -q CRONUX-AUDIT-OK run.txt
+          grep -q CRONUX-AUDIT-OK run.txt && grep -q CRONUX-WORLD-OK run.txt
       - name: publish log
         if: always()
         run: |

@@ -14,17 +14,34 @@ public final class CronuxClient implements ClientModInitializer {
     private static KeyMapping openConfig;
     /** -Dcronux.audit=true : force l'application de tous les mixins (test automatique). */
     private static final boolean AUDIT = Boolean.getBoolean("cronux.audit");
-    private static boolean audited;
+    private static int auditTicks, worldTicks;
 
-    private static void audit(net.minecraft.client.Minecraft mc) {
-        try {
-            org.spongepowered.asm.mixin.MixinEnvironment.getCurrentEnvironment().audit();
-            mc.gui.setScreen(new CronuxScreen(mc.gui.screen()));
-            LOG.info("CRONUX-AUDIT-OK");
-        } catch (Throwable t) {
-            LOG.error("CRONUX-AUDIT-FAIL", t);
+    private static void auditTick(net.minecraft.client.Minecraft mc) {
+        if (auditTicks++ == 0) {
+            try {
+                org.spongepowered.asm.mixin.MixinEnvironment.getCurrentEnvironment().audit();
+                LOG.info("CRONUX-AUDIT-OK");
+            } catch (Throwable t) {
+                LOG.error("CRONUX-AUDIT-FAIL", t);
+                mc.stop();
+            }
+            CronuxConfig.noSky = CronuxConfig.noParticles = CronuxConfig.noHand = CronuxConfig.noWeather = true;
+            CronuxConfig.entityDistance = 16;
+            CronuxConfig.blockEntityDistance = 16;
         }
-        mc.stop();
+        if (mc.level != null && mc.player != null) {
+            worldTicks++;
+            if (worldTicks == 100) mc.gui.setScreen(new CronuxScreen(null));
+            if (worldTicks == 140) mc.gui.setScreen(null);
+            if (worldTicks % 40 == 0) LOG.info("CRONUX-WORLD tick={} fps={}", worldTicks, mc.getFps());
+            if (worldTicks >= 400) {
+                LOG.info("CRONUX-WORLD-OK");
+                mc.stop();
+            }
+        } else if (auditTicks > 6000) {
+            LOG.error("CRONUX-WORLD-TIMEOUT");
+            mc.stop();
+        }
     }
 
     @Override
@@ -34,10 +51,7 @@ public final class CronuxClient implements ClientModInitializer {
                 new KeyMapping("key.cronux.config", InputConstants.KEY_O, KeyMapping.Category.MISC));
 
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
-            if (AUDIT && !audited) {
-                audited = true;
-                audit(mc);
-            }
+            if (AUDIT) auditTick(mc);
             if (!CronuxConfig.firstLaunchDone) {
                 CronuxConfig.firstLaunchDone = true;
                 FpsPreset.FPS_MAX.apply(mc);
