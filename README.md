@@ -1,6 +1,6 @@
 # Cronux Performance
 
-A client-side Fabric mod for **Minecraft 1.21.1**, built to squeeze out as many FPS as possible.
+A client-side Fabric mod for **Minecraft 26.x (26.1 → 26.3)**, built to squeeze out as many FPS as possible.
 
 ## What it does
 - **FPS preset applied on first launch:** VSync off, unlimited FPS, Fast graphics, clouds and particles off/minimal, no entity shadows, smooth lighting off, biome blend 0, mipmaps 0, render distance 8, simulation distance 5. The preset is applied **once**; you can change your settings afterwards.
@@ -8,7 +8,7 @@ A client-side Fabric mod for **Minecraft 1.21.1**, built to squeeze out as many 
 - Configuration lives in `config/cronux.properties`. Set `applyPreset=true` to reapply the preset.
 
 ## Getting the most FPS (the mod alone isn't enough)
-Install these alongside it (Fabric 1.21.1). They do the heavy lifting:
+Install these alongside it (Fabric, same game version). They do the heavy lifting:
 
 | Mod | Effect |
 |---|---|
@@ -25,6 +25,11 @@ Recommended JVM arguments (launcher → Java arguments):
 
 ### About "8000 FPS"
 Minecraft has no hard limit above "Unlimited". The real ceiling is your CPU/GPU and the scene. With Sodium plus this preset, a powerful PC can reach several thousand FPS looking at the sky or in a small world. In normal play, expect a few hundred to ~1500 FPS on high-end hardware. Your screen only displays its refresh rate (144/240 Hz…) anyway.
+
+## Download
+Ready-made jar: [`release/cronux-performance-1.1.0.jar`](release/cronux-performance-1.1.0.jar) → put it in `.minecraft/mods/` with Fabric Loader for 26.3.
+
+Since 26.1 Minecraft is no longer obfuscated: the mod targets the official class names through Mixin + reflection, with no compile-time dependency on the game, and silently skips any option that doesn't exist in your version.
 
 ## Build
 ```bash

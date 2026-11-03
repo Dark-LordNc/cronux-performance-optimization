@@ -1,20 +1,16 @@
 {
   "schemaVersion": 1,
   "id": "cronux",
-  "version": "${version}",
+  "version": "1.1.0",
   "name": "Cronux Performance",
-  "description": "Réglages FPS agressifs + micro-optimisations du rendu. À combiner avec Sodium, Lithium, FerriteCore, ImmediatelyFast et EntityCulling.",
+  "description": "Preset FPS agressif + micro-optimisations du rendu. A combiner avec Sodium, Lithium, FerriteCore, ImmediatelyFast et EntityCulling.",
   "authors": ["Dark-LordNc"],
   "license": "MIT",
   "environment": "client",
-  "entrypoints": {
-    "client": ["fr.cronux.perf.CronuxPerf"]
-  },
   "mixins": ["cronux.mixins.json"],
   "depends": {
     "fabricloader": ">=0.16.0",
-    "minecraft": "~1.21.1",
-    "java": ">=21"
+    "minecraft": ">=26.1"
   },
   "suggests": {
     "sodium": "*",
