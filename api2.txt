@@ -1,0 +1,292 @@
+Compiled from "InputConstants.java"
+public class com.mojang.blaze3d.platform.InputConstants {
+  private static final org.slf4j.Logger LOGGER;
+  public static final int KEY_0;
+  public static final int KEY_1;
+  public static final int KEY_2;
+  public static final int KEY_3;
+  public static final int KEY_4;
+  public static final int KEY_5;
+  public static final int KEY_6;
+  public static final int KEY_7;
+  public static final int KEY_8;
+  public static final int KEY_9;
+  public static final int KEY_A;
+  public static final int KEY_B;
+  public static final int KEY_C;
+  public static final int KEY_D;
+  public static final int KEY_E;
+  public static final int KEY_F;
+  public static final int KEY_G;
+  public static final int KEY_H;
+  public static final int KEY_I;
+  public static final int KEY_J;
+  public static final int KEY_K;
+  public static final int KEY_L;
+  public static final int KEY_M;
+  public static final int KEY_N;
+  public static final int KEY_O;
+  public static final int KEY_P;
+  public static final int KEY_Q;
+  public static final int KEY_R;
+  public static final int KEY_S;
+  public static final int KEY_T;
+  public static final int KEY_U;
+  public static final int KEY_V;
+  public static final int KEY_W;
+  public static final int KEY_X;
+  public static final int KEY_Y;
+  public static final int KEY_Z;
+  public static final int KEY_F1;
+  public static final int KEY_F2;
+  public static final int KEY_F3;
+  public static final int KEY_F4;
+  public static final int KEY_F5;
+  public static final int KEY_F6;
+  public static final int KEY_F7;
+  public static final int KEY_F8;
+  public static final int KEY_F9;
+  public static final int KEY_F10;
+  public static final int KEY_F11;
+  public static final int KEY_F12;
+  public static final int KEY_F13;
+  public static final int KEY_F14;
+  public static final int KEY_F15;
+  public static final int KEY_F16;
+  public static final int KEY_F17;
+  public static final int KEY_F18;
+  public static final int KEY_F19;
+  public static final int KEY_F20;
+  public static final int KEY_F21;
+  public static final int KEY_F22;
+  public static final int KEY_F23;
+  public static final int KEY_F24;
+  public static final int KEY_NUMLOCK;
+  public static final int KEY_NUMPAD0;
+  public static final int KEY_NUMPAD1;
+  public static final int KEY_NUMPAD2;
+  public static final int KEY_NUMPAD3;
+  public static final int KEY_NUMPAD4;
+  public static final int KEY_NUMPAD5;
+  public static final int KEY_NUMPAD6;
+  public static final int KEY_NUMPAD7;
+  public static final int KEY_NUMPAD8;
+  public static final int KEY_NUMPAD9;
+  public static final int KEY_NUMPADCOMMA;
+  public static final int KEY_NUMPADENTER;
+  public static final int KEY_NUMPADEQUALS;
+  public static final int KEY_DOWN;
+  public static final int KEY_LEFT;
+  public static final int KEY_RIGHT;
+  public static final int KEY_UP;
+  public static final int KEY_ADD;
+  public static final int KEY_APOSTROPHE;
+  public static final int KEY_BACKSLASH;
+  public static final int KEY_COMMA;
+  public static final int KEY_EQUALS;
+  public static final int KEY_GRAVE;
+  public static final int KEY_LBRACKET;
+  public static final int KEY_MINUS;
+  public static final int KEY_MULTIPLY;
+  public static final int KEY_PERIOD;
+  public static final int KEY_RBRACKET;
+  public static final int KEY_SEMICOLON;
+  public static final int KEY_SLASH;
+  public static final int KEY_SPACE;
+  public static final int KEY_TAB;
+  public static final int KEY_LALT;
+  public static final int KEY_LCONTROL;
+  public static final int KEY_LSHIFT;
+  public static final int KEY_LGUI;
+  public static final int KEY_RALT;
+  public static final int KEY_RCONTROL;
+  public static final int KEY_RSHIFT;
+  public static final int KEY_RGUI;
+  public static final int KEY_RETURN;
+  public static final int KEY_ESCAPE;
+  public static final int KEY_BACKSPACE;
+  public static final int KEY_DELETE;
+  public static final int KEY_END;
+  public static final int KEY_HOME;
+  public static final int KEY_INSERT;
+  public static final int KEY_PAGEDOWN;
+  public static final int KEY_PAGEUP;
+  public static final int KEY_CAPSLOCK;
+  public static final int KEY_PAUSE;
+  public static final int KEY_SCROLLLOCK;
+  public static final int KEY_PRINTSCREEN;
+  public static final int PRESS;
+  public static final int RELEASE;
+  public static final int REPEAT;
+  public static final int MOUSE_BUTTON_LEFT;
+  public static final int MOUSE_BUTTON_MIDDLE;
+  public static final int MOUSE_BUTTON_RIGHT;
+  public static final int MOUSE_BUTTON_4;
+  public static final int MOUSE_BUTTON_5;
+  public static final int MOUSE_BUTTON_6;
+  public static final int MOUSE_BUTTON_7;
+  public static final int MOUSE_BUTTON_8;
+  public static final int MOD_SHIFT;
+  public static final int MOD_CONTROL;
+  public static final int MOD_ALT;
+  public static final int MOD_SUPER;
+  public static final int MOD_CAPS_LOCK;
+  public static final int MOD_NUM_LOCK;
+  public static final int KEYCODE_A;
+  public static final int KEYCODE_B;
+  public static final int KEYCODE_C;
+  public static final int KEYCODE_E;
+  public static final int KEYCODE_F;
+  public static final int KEYCODE_L;
+  public static final int KEYCODE_M;
+  public static final int KEYCODE_O;
+  public static final int KEYCODE_R;
+  public static final int KEYCODE_U;
+  public static final int KEYCODE_V;
+  public static final int KEYCODE_W;
+  public static final int KEYCODE_X;
+  public static final int KEYCODE_Y;
+  public static final int KEYCODE_Z;
+  public static final int KEYCODE_RETURN;
+  public static final int KEYCODE_NUMPADENTER;
+  public static final int KEYCODE_PAGEUP;
+  public static final int KEYCODE_PAGEDOWN;
+  public static final int KEYCODE_BACKSPACE;
+  public static final int KEYCODE_UP;
+  public static final int KEYCODE_DOWN;
+  public static final int KEYCODE_FORWARD;
+  public static final int KEYCODE_BACKWARD;
+  public static final int KEYCODE_LEFT;
+  public static final int KEYCODE_RIGHT;
+  public static final int KEYCODE_NUMPAD9;
+  public static final int KEYCODE_NUMPAD3;
+  public static final int KEYCODE_DELETE;
+  public static final int KEYCODE_HOME;
+  public static final int KEYCODE_END;
+  public static final int KEYCODE_F5;
+  public static final int KEYCODE_TAB;
+  public static final int KEYCODE_LCONTROL;
+  public static final int KEYCODE_RCONTROL;
+  public static final int KEYCODE_SPACE;
+  public static final com.mojang.blaze3d.platform.InputConstants$Key UNKNOWN;
+  public com.mojang.blaze3d.platform.InputConstants();
+  public static com.mojang.blaze3d.platform.InputConstants$Key getKey(net.minecraft.client.input.KeyEvent);
+  public static com.mojang.blaze3d.platform.InputConstants$Key getKey(java.lang.String);
+  public static boolean isKeyDown(int);
+  public static void grabMouse(com.mojang.blaze3d.platform.Window, double, double);
+  public static void releaseMouse(com.mojang.blaze3d.platform.Window, double, double);
+  static {};
+}
+Compiled from "InputConstants.java"
+public final class com.mojang.blaze3d.platform.InputConstants$Key {
+  private final java.lang.String name;
+  private final com.mojang.blaze3d.platform.InputConstants$Type type;
+  private final int value;
+  private static final java.util.Map<java.lang.String, com.mojang.blaze3d.platform.InputConstants$Key> NAME_MAP;
+  private com.mojang.blaze3d.platform.InputConstants$Key(java.lang.String, com.mojang.blaze3d.platform.InputConstants$Type, int);
+  public com.mojang.blaze3d.platform.InputConstants$Type getType();
+  public int getValue();
+  public java.lang.String getName();
+  public net.minecraft.network.chat.Component getDisplayName();
+  public java.util.OptionalInt getNumericKeyValue();
+  public boolean equals(java.lang.Object);
+  public int hashCode();
+  public java.lang.String toString();
+  static {};
+}
+Compiled from "OptionsList.java"
+public class net.minecraft.client.gui.components.OptionsList extends net.minecraft.client.gui.components.ContainerObjectSelectionList<net.minecraft.client.gui.components.OptionsList$AbstractEntry> {
+  private static final int BIG_BUTTON_WIDTH;
+  private static final int DEFAULT_ITEM_HEIGHT;
+  private final net.minecraft.client.gui.screens.options.OptionsSubScreen screen;
+  public net.minecraft.client.gui.components.OptionsList(net.minecraft.client.Minecraft, int, net.minecraft.client.gui.screens.options.OptionsSubScreen);
+  public void addBig(net.minecraft.client.OptionInstance<?>);
+  public void addBig(net.minecraft.client.gui.components.AbstractWidget);
+  public void addSmall(net.minecraft.client.OptionInstance<?>...);
+  public void addSmall(java.util.List<net.minecraft.client.gui.components.AbstractWidget>);
+  public void addSmall(net.minecraft.client.gui.components.AbstractWidget, net.minecraft.client.gui.components.AbstractWidget);
+  public void addSmall(net.minecraft.client.gui.components.AbstractWidget, net.minecraft.client.OptionInstance<?>, net.minecraft.client.gui.components.AbstractWidget);
+  public void addHeader(net.minecraft.network.chat.Component);
+  public int getRowWidth();
+  public net.minecraft.client.gui.components.AbstractWidget findOption(net.minecraft.client.OptionInstance<?>);
+  public void applyUnsavedChanges();
+  public void resetOption(net.minecraft.client.OptionInstance<?>);
+}
+Compiled from "CycleButton.java"
+public interface net.minecraft.client.gui.components.CycleButton$OnValueChange<T> {
+  public abstract void onValueChange(net.minecraft.client.gui.components.CycleButton<T>, T);
+}
+Compiled from "Button.java"
+public interface net.minecraft.client.gui.components.Button$OnPress {
+  public abstract void onPress(net.minecraft.client.gui.components.Button);
+}
+Compiled from "GridLayout.java"
+public class net.minecraft.client.gui.layouts.GridLayout extends net.minecraft.client.gui.layouts.AbstractLayout {
+  private final java.util.List<net.minecraft.client.gui.layouts.GridLayout$ChildContainer> children;
+  private final net.minecraft.client.gui.layouts.LayoutSettings defaultCellSettings;
+  private int rowSpacing;
+  private int columnSpacing;
+  public net.minecraft.client.gui.layouts.GridLayout();
+  public net.minecraft.client.gui.layouts.GridLayout(int, int);
+  public void arrangeElements();
+  public <T extends net.minecraft.client.gui.layouts.LayoutElement> T addChild(T, int, int);
+  public <T extends net.minecraft.client.gui.layouts.LayoutElement> T addChild(T, int, int, net.minecraft.client.gui.layouts.LayoutSettings);
+  public <T extends net.minecraft.client.gui.layouts.LayoutElement> T addChild(T, int, int, java.util.function.Consumer<net.minecraft.client.gui.layouts.LayoutSettings>);
+  public <T extends net.minecraft.client.gui.layouts.LayoutElement> T addChild(T, int, int, int, int);
+  public <T extends net.minecraft.client.gui.layouts.LayoutElement> T addChild(T, int, int, int, int, net.minecraft.client.gui.layouts.LayoutSettings);
+  public <T extends net.minecraft.client.gui.layouts.LayoutElement> T addChild(T, int, int, int, int, java.util.function.Consumer<net.minecraft.client.gui.layouts.LayoutSettings>);
+  public net.minecraft.client.gui.layouts.GridLayout columnSpacing(int);
+  public net.minecraft.client.gui.layouts.GridLayout rowSpacing(int);
+  public net.minecraft.client.gui.layouts.GridLayout spacing(int);
+  public void visitChildren(java.util.function.Consumer<net.minecraft.client.gui.layouts.LayoutElement>);
+  public void removeChildren();
+  public net.minecraft.client.gui.layouts.LayoutSettings newCellSettings();
+  public net.minecraft.client.gui.layouts.LayoutSettings defaultCellSetting();
+  public net.minecraft.client.gui.layouts.GridLayout$RowHelper createRowHelper(int);
+  private static void lambda$visitChildren$0(java.util.function.Consumer, net.minecraft.client.gui.layouts.GridLayout$ChildContainer);
+}
+Compiled from "GridLayout.java"
+public final class net.minecraft.client.gui.layouts.GridLayout$RowHelper {
+  private final int columns;
+  private int index;
+  final net.minecraft.client.gui.layouts.GridLayout this$0;
+  private net.minecraft.client.gui.layouts.GridLayout$RowHelper(net.minecraft.client.gui.layouts.GridLayout, int);
+  public <T extends net.minecraft.client.gui.layouts.LayoutElement> T addChild(T);
+  public <T extends net.minecraft.client.gui.layouts.LayoutElement> T addChild(T, int);
+  public <T extends net.minecraft.client.gui.layouts.LayoutElement> T addChild(T, net.minecraft.client.gui.layouts.LayoutSettings);
+  public <T extends net.minecraft.client.gui.layouts.LayoutElement> T addChild(T, int, net.minecraft.client.gui.layouts.LayoutSettings);
+  public net.minecraft.client.gui.layouts.GridLayout getGrid();
+  public net.minecraft.client.gui.layouts.LayoutSettings newCellSettings();
+  public net.minecraft.client.gui.layouts.LayoutSettings defaultCellSetting();
+}
+Compiled from "FramerateLimitTracker.java"
+public final class com.mojang.blaze3d.platform.FramerateLimitTracker$FramerateThrottleReason extends java.lang.Enum<com.mojang.blaze3d.platform.FramerateLimitTracker$FramerateThrottleReason> {
+  public static final com.mojang.blaze3d.platform.FramerateLimitTracker$FramerateThrottleReason NONE;
+  public static final com.mojang.blaze3d.platform.FramerateLimitTracker$FramerateThrottleReason WINDOW_ICONIFIED;
+  public static final com.mojang.blaze3d.platform.FramerateLimitTracker$FramerateThrottleReason LONG_AFK;
+  public static final com.mojang.blaze3d.platform.FramerateLimitTracker$FramerateThrottleReason SHORT_AFK;
+  public static final com.mojang.blaze3d.platform.FramerateLimitTracker$FramerateThrottleReason OUT_OF_LEVEL_MENU;
+  private static final com.mojang.blaze3d.platform.FramerateLimitTracker$FramerateThrottleReason[] $VALUES;
+  public static com.mojang.blaze3d.platform.FramerateLimitTracker$FramerateThrottleReason[] values();
+  public static com.mojang.blaze3d.platform.FramerateLimitTracker$FramerateThrottleReason valueOf(java.lang.String);
+  private com.mojang.blaze3d.platform.FramerateLimitTracker$FramerateThrottleReason();
+  private static com.mojang.blaze3d.platform.FramerateLimitTracker$FramerateThrottleReason[] $values();
+  static {};
+}
+Compiled from "InactivityFpsLimit.java"
+public final class net.minecraft.client.InactivityFpsLimit extends java.lang.Enum<net.minecraft.client.InactivityFpsLimit> implements net.minecraft.util.StringRepresentable {
+  public static final net.minecraft.client.InactivityFpsLimit MINIMIZED;
+  public static final net.minecraft.client.InactivityFpsLimit AFK;
+  public static final com.mojang.serialization.Codec<net.minecraft.client.InactivityFpsLimit> CODEC;
+  private final java.lang.String serializedName;
+  private final net.minecraft.network.chat.Component caption;
+  private static final net.minecraft.client.InactivityFpsLimit[] $VALUES;
+  public static net.minecraft.client.InactivityFpsLimit[] values();
+  public static net.minecraft.client.InactivityFpsLimit valueOf(java.lang.String);
+  private net.minecraft.client.InactivityFpsLimit(java.lang.String, java.lang.String);
+  public net.minecraft.network.chat.Component caption();
+  public java.lang.String getSerializedName();
+  private static net.minecraft.client.InactivityFpsLimit[] $values();
+  static {};
+}
+Error: class not found: net.minecraft.server.level.ParticleStatus

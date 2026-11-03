@@ -1,0 +1,39 @@
+191:  private final com.mojang.blaze3d.platform.FramerateLimitTracker framerateLimitTracker;
+192-
+193-  public boolean multiDrawIndirect;
+194-
+--
+1624:      3184: putfield      #1499               // Field framerateLimitTracker:Lcom/mojang/blaze3d/platform/FramerateLimitTracker;
+1625-      3187: aload_0
+1626-      3188: new           #1503               // class net/minecraft/util/profiling/ContinuousProfiler
+1627-      3191: dup
+--
+1632:      3202: getfield      #1499               // Field framerateLimitTracker:Lcom/mojang/blaze3d/platform/FramerateLimitTracker;
+1633-      3205: dup
+1634-      3206: invokestatic  #758                // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;
+1635-      3209: pop
+--
+3152:       408: getfield      #1499               // Field framerateLimitTracker:Lcom/mojang/blaze3d/platform/FramerateLimitTracker;
+3153:       411: invokevirtual #2489               // Method com/mojang/blaze3d/platform/FramerateLimitTracker.getFramerateLimit:()I
+3154:       414: putfield      #2492               // Field net/minecraft/client/renderer/state/GameRenderState.framerateLimit:I
+3155-       417: aload_0
+3156-       418: getfield      #1169               // Field gameRenderer:Lnet/minecraft/client/renderer/GameRenderer;
+3157-       421: aload_0
+--
+3294:       773: getfield      #2492               // Field net/minecraft/client/renderer/state/GameRenderState.framerateLimit:I
+3295-       776: istore        6
+3296-       778: iload         6
+3297-       780: sipush        260
+--
+3300:       788: invokestatic  #2570               // Method net/minecraft/client/FramerateLimiter.limitDisplayFPS:(I)V
+3301-       791: aload_2
+3302-       792: ldc_w         #2575               // String fpsUpdate
+3303-       795: invokeinterface #2248,  2         // InterfaceMethod net/minecraft/util/profiling/ProfilerFiller.popPush:(Ljava/lang/String;)V
+--
+7334:  public com.mojang.blaze3d.platform.FramerateLimitTracker getFramerateLimitTracker();
+7335-    Code:
+7336-         0: aload_0
+7337:         1: getfield      #1499               // Field framerateLimitTracker:Lcom/mojang/blaze3d/platform/FramerateLimitTracker;
+7338-         4: areturn
+7339-
+7340-  public net.minecraft.client.gui.components.DebugScreenOverlay getDebugOverlay();
