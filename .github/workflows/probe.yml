@@ -1,0 +1,28 @@
+name: probe
+on: [push, workflow_dispatch]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 25 }
+      - name: versions
+        run: |
+          echo "== loom"; curl -s https://maven.fabricmc.net/net/fabricmc/fabric-loom/maven-metadata.xml | grep -o '<version>[^<]*</version>' | tail -8
+          echo "== loom plugin ids"; curl -s https://maven.fabricmc.net/net/fabricmc/ | grep -o 'href="[^"]*loom[^"]*"'
+          echo "== games"; curl -s https://meta.fabricmc.net/v2/versions/game | jq -r '.[0:12][] | "\(.version) \(.stable)"'
+          echo "== loader"; curl -s https://meta.fabricmc.net/v2/versions/loader | jq -r '.[0:3][] | .version'
+          echo "== fabric-api"; curl -s https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/maven-metadata.xml | grep -o '<version>[^<]*26\.[^<]*</version>' | tail -6
+          echo "== modmenu"; curl -s https://maven.terraformersmc.com/releases/com/terraformersmc/modmenu/maven-metadata.xml | grep -o '<version>[^<]*</version>' | tail -4
+      - name: javap
+        run: |
+          V=26.3
+          U=$(curl -s https://piston-meta.mojang.com/mc/game/version_manifest_v2.json | jq -r --arg v $V '.versions[]|select(.id==$v)|.url')
+          echo "manifest url: $U"
+          curl -s "$U" -o v.json; curl -s $(jq -r .downloads.client.url v.json) -o client.jar; ls -la client.jar
+          mkdir c && cd c && unzip -q ../client.jar 'net/minecraft/*' && cd ..
+          for cls in net.minecraft.client.Minecraft net.minecraft.client.Options net.minecraft.client.OptionInstance net.minecraft.client.gui.Gui net.minecraft.client.renderer.GameRenderer net.minecraft.client.renderer.LevelRenderer net.minecraft.client.renderer.entity.EntityRenderDispatcher net.minecraft.client.renderer.entity.EntityRenderer net.minecraft.client.particle.ParticleEngine net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher net.minecraft.client.renderer.fog.FogRenderer net.minecraft.client.renderer.SkyRenderer net.minecraft.client.renderer.WeatherEffectRenderer net.minecraft.client.gui.screens.Screen net.minecraft.client.gui.screens.options.VideoSettingsScreen net.minecraft.client.gui.components.Button net.minecraft.client.gui.components.CycleButton net.minecraft.client.KeyMapping com.mojang.blaze3d.platform.Window; do
+            echo "######## $cls"; javap -p -cp c $cls 2>&1 | grep -v 'lambda\$' | head -150
+          done
+          echo "######## files"; ls c/net/minecraft/client/renderer | head -100; ls c/net/minecraft/client/renderer/fog 2>/dev/null
+          grep -l "renderVignette\|Vignette" -r c/net/minecraft/client/gui | head
