@@ -22,19 +22,21 @@ public final class CronuxClient implements ClientModInitializer {
             Class<?> cws = Class.forName("net.minecraft.client.gui.screens.worldselection.CreateWorldScreen");
             Object screen = mc.gui.screen();
             if (!cws.isInstance(screen)) {
+                java.lang.reflect.Method best = null;
                 for (java.lang.reflect.Method m : cws.getMethods()) {
-                    if (!m.getName().equals("openFresh") || !java.lang.reflect.Modifier.isStatic(m.getModifiers())) continue;
-                    Object[] args = new Object[m.getParameterCount()];
-                    Class<?>[] types = m.getParameterTypes();
-                    for (int i = 0; i < args.length; i++) {
-                        if (types[i] == net.minecraft.client.Minecraft.class) args[i] = mc;
-                        else if (types[i] == Runnable.class) args[i] = (Runnable) () -> {};
-                        else if (net.minecraft.client.gui.screens.Screen.class.isAssignableFrom(types[i])) args[i] = screen;
-                    }
-                    LOG.info("CRONUX-TEST openFresh{}", java.util.Arrays.toString(types));
-                    m.invoke(null, args);
-                    return;
+                    if (m.getName().equals("openFresh") && java.lang.reflect.Modifier.isStatic(m.getModifiers())
+                            && (best == null || m.getParameterCount() < best.getParameterCount())) best = m;
                 }
+                Object[] args = new Object[best.getParameterCount()];
+                Class<?>[] types = best.getParameterTypes();
+                for (int i = 0; i < args.length; i++) {
+                    if (types[i] == net.minecraft.client.Minecraft.class) args[i] = mc;
+                    else if (types[i] == Runnable.class) args[i] = (Runnable) () -> {};
+                    else if (net.minecraft.client.gui.screens.Screen.class.isAssignableFrom(types[i])) args[i] = screen;
+                    else args[i] = findStatic(types[i], cws);
+                }
+                LOG.info("CRONUX-TEST openFresh{} -> {}", java.util.Arrays.toString(types), java.util.Arrays.toString(args));
+                best.invoke(null, args);
             } else {
                 java.lang.reflect.Method create = cws.getDeclaredMethod("onCreate");
                 create.setAccessible(true);
@@ -44,6 +46,29 @@ public final class CronuxClient implements ClientModInitializer {
         } catch (Throwable t) {
             LOG.error("CRONUX-TEST world creation failed (screen={})", mc.gui.screen(), t);
         }
+    }
+
+    /** Cherche une valeur statique du type voulu (champ ou méthode sans argument). */
+    private static Object findStatic(Class<?> type, Class<?>... owners) throws ReflectiveOperationException {
+        java.util.List<Class<?>> all = new java.util.ArrayList<>(java.util.List.of(owners));
+        all.add(type);
+        for (Class<?> c : all) {
+            for (java.lang.reflect.Field f : c.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) && type.isAssignableFrom(f.getType())) {
+                    f.setAccessible(true);
+                    return f.get(null);
+                }
+            }
+            for (java.lang.reflect.Method m : c.getDeclaredMethods()) {
+                if (java.lang.reflect.Modifier.isStatic(m.getModifiers()) && m.getParameterCount() == 0
+                        && type.isAssignableFrom(m.getReturnType())) {
+                    m.setAccessible(true);
+                    return m.invoke(null);
+                }
+            }
+        }
+        LOG.warn("CRONUX-TEST no static {} found", type.getName());
+        return null;
     }
 
     private static void auditTick(net.minecraft.client.Minecraft mc) {
