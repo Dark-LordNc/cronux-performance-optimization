@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "fr.cronux.perf.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "MinecraftClientMixin",
+    "InGameHudMixin"
+  ],
+  "injectors": { "defaultRequire": 0 }
+}
